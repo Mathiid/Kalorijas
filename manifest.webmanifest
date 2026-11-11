@@ -1,0 +1,28 @@
+{
+  "id": "./",
+  "name": "Kaloriju sekotājs",
+  "short_name": "Kalorijas",
+  "description": "Nofotografē ēdienu un uzzini aptuvenās kalorijas",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#2f8f5b",
+  "theme_color": "#2f8f5b",
+  "lang": "lv",
+  "categories": ["health", "food", "lifestyle"],
+  "icons": [
+    { "src": "icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "maskable" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ],
+  "shortcuts": [
+    {
+      "name": "Skenēt ēdienu",
+      "short_name": "Skenēt",
+      "url": "./index.html#scan",
+      "icons": [{ "src": "icon-192.png", "sizes": "192x192", "type": "image/png" }]
+    }
+  ]
+}

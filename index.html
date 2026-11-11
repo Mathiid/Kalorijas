@@ -1,0 +1,925 @@
+<!DOCTYPE html>
+<html lang="lv">
+<head>
+<meta charset="utf-8">
+<title>Kaloriju sekotājs</title>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#2f8f5b">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Kalorijas">
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<link rel="icon" type="image/png" sizes="32x32" href="favicon-32.png">
+<link rel="icon" type="image/png" sizes="192x192" href="icon-192.png">
+<link rel="apple-touch-icon" href="icon-180.png">
+<style>
+:root{
+  --bg:#f5f7f4;--card:#ffffff;--ink:#1b2420;--mute:#66726b;--line:#e2e7e2;
+  --acc:#2f8f5b;--acc-ink:#ffffff;--acc-soft:#e3f3ea;
+  --warn:#d9822b;--bad:#c8473d;--bad-soft:#fbeae8;--warn-soft:#fdf1e2;
+  --p:#4f7cff;--c:#e0a82e;--f:#d9643f;--r:16px;
+}
+@media (prefers-color-scheme:dark){
+  :root{--bg:#0f1512;--card:#19201c;--ink:#e8ede9;--mute:#8d9a92;--line:#2a332d;
+    --acc:#3fae73;--acc-ink:#06140c;--acc-soft:#1c3226;--bad-soft:#3a1f1c;--warn-soft:#38291a}
+}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0}
+body{background:var(--bg);color:var(--ink);font:16px/1.4 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  padding-bottom:calc(76px + env(safe-area-inset-bottom))}
+main{max-width:560px;margin:0 auto;padding:14px 14px 8px;padding-top:calc(14px + env(safe-area-inset-top))}
+h1{font-size:22px;margin:4px 0 12px}
+h2{font-size:15px;margin:18px 0 8px;color:var(--mute);font-weight:600;text-transform:uppercase;letter-spacing:.04em}
+.stack{display:flex;flex-direction:column;gap:12px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:var(--r);padding:14px}
+.muted{color:var(--mute)}.small{font-size:13px}
+button,.btn{font:inherit;cursor:pointer}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;border:1px solid var(--line);background:var(--card);
+  color:var(--ink);border-radius:14px;padding:12px 16px;font-weight:600;text-align:center}
+.btn.pri{background:var(--acc);color:var(--acc-ink);border-color:var(--acc)}
+.btn.big{flex-direction:column;padding:22px 10px;font-size:17px;flex:1}
+.btn.big .ico{font-size:34px;line-height:1}
+.btn.danger{color:var(--bad);border-color:var(--bad)}
+.btn.sm{padding:8px 12px;font-size:14px;border-radius:12px}
+.btn:disabled{opacity:.5}
+.row{display:flex;gap:10px;align-items:center}
+.row.wrap{flex-wrap:wrap}
+.grow{flex:1;min-width:0}
+.in{font:inherit;color:var(--ink);background:var(--bg);border:1px solid var(--line);border-radius:12px;padding:10px 12px;width:100%}
+.in:focus{outline:2px solid var(--acc);outline-offset:0}
+.in.num{text-align:right}
+textarea.in{resize:vertical;min-height:64px}
+label.f{display:block;font-size:13px;color:var(--mute);margin-bottom:4px}
+.tabs{position:fixed;left:0;right:0;bottom:0;display:flex;background:var(--card);border-top:1px solid var(--line);
+  padding-bottom:env(safe-area-inset-bottom);z-index:5}
+.tabs button{flex:1;border:0;background:none;padding:9px 4px 8px;color:var(--mute);display:flex;flex-direction:column;
+  align-items:center;gap:2px;font-size:12px}
+.tabs button .ti{font-size:22px;line-height:1}
+.tabs button.on{color:var(--acc);font-weight:700}
+#toast{position:fixed;left:50%;bottom:calc(92px + env(safe-area-inset-bottom));transform:translateX(-50%) translateY(20px);
+  background:#222;color:#fff;padding:10px 16px;border-radius:12px;font-size:14px;opacity:0;pointer-events:none;
+  transition:.2s;max-width:88vw;text-align:center;z-index:10}
+#toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+/* dienas navigācija */
+.daynav{display:flex;align-items:center;gap:8px;margin-bottom:12px}
+.daynav .lbl{flex:1;text-align:center}
+.daynav .lbl b{display:block;font-size:18px}
+.daynav button.arrow{width:44px;height:44px;border-radius:12px;border:1px solid var(--line);background:var(--card);color:var(--ink);font-size:20px}
+/* kopsavilkums */
+.big-kcal{font-size:38px;font-weight:800;letter-spacing:-.02em;line-height:1.05}
+.big-kcal small{font-size:16px;font-weight:500;color:var(--mute)}
+.bar{height:10px;background:var(--line);border-radius:99px;overflow:hidden;margin:12px 0 8px}
+.bar>i{display:block;height:100%;background:var(--acc);border-radius:99px;transition:width .3s}
+.bar.over>i{background:var(--bad)}
+.chips{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
+.chip{flex:1;min-width:0;white-space:nowrap;background:var(--bg);border-radius:12px;padding:8px 10px;font-size:13px;color:var(--mute)}
+.chip b{display:block;color:var(--ink);font-size:16px}
+.chip i{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:5px}
+/* nedēļa */
+.week{display:flex;gap:6px;height:110px}
+.wcol{flex:1;border:0;background:none;padding:0;display:flex;flex-direction:column;align-items:center;gap:3px;color:var(--mute);font-size:11px;min-width:0}
+.wbar-wrap{flex:1;width:100%;display:flex;align-items:flex-end;background:var(--bg);border-radius:8px;overflow:hidden}
+.wbar{width:100%;background:var(--acc);border-radius:6px 6px 0 0;opacity:.55}
+.wbar.over{background:var(--bad)}
+.wcol.sel .wbar{opacity:1}.wcol.sel{color:var(--ink);font-weight:700}
+/* ieraksti */
+.entry{display:flex;gap:12px;align-items:center;padding:10px;border-radius:14px;background:var(--card);border:1px solid var(--line);cursor:pointer}
+.thumb{width:54px;height:54px;border-radius:12px;object-fit:cover;background:var(--acc-soft);flex:none;display:flex;align-items:center;justify-content:center;font-size:26px}
+.ent-main{flex:1;min-width:0}
+.ent-name{font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ent-kcal{text-align:right;font-weight:800;font-size:18px;line-height:1.1}
+.ent-kcal small{display:block;font-weight:500;color:var(--mute);font-size:11px}
+.detail{margin:-4px 0 4px;padding:10px 12px;background:var(--bg);border-radius:0 0 14px 14px;border:1px solid var(--line);border-top:0;font-size:14px}
+.detail .li{display:flex;justify-content:space-between;gap:8px;padding:3px 0}
+/* skenēšana */
+.preview{width:100%;max-height:260px;object-fit:cover;border-radius:14px;display:block}
+.spin{width:26px;height:26px;border:3px solid var(--line);border-top-color:var(--acc);border-radius:50%;animation:sp .8s linear infinite;flex:none}
+@keyframes sp{to{transform:rotate(360deg)}}
+.notice{border-radius:12px;padding:10px 12px;font-size:14px;background:var(--warn-soft);color:var(--ink);border:1px solid var(--warn)}
+.notice.err{background:var(--bad-soft);border-color:var(--bad)}
+.notice.ok{background:var(--acc-soft);border-color:var(--acc)}
+.item{background:var(--bg);border:1px solid var(--line);border-radius:14px;padding:10px;display:flex;flex-direction:column;gap:8px}
+.item .x{width:40px;height:40px;border-radius:10px;border:1px solid var(--line);background:var(--card);color:var(--bad);font-size:18px;flex:none}
+.unit{display:flex;align-items:center;gap:6px;flex:1}
+.unit span{color:var(--mute);font-size:13px;min-width:30px}
+.macros{font-size:12.5px;color:var(--mute)}
+.totals{background:var(--acc-soft);border:1px solid var(--acc);border-radius:14px;padding:12px}
+.totals .tk{font-size:30px;font-weight:800;line-height:1}
+.badge{display:inline-block;padding:2px 9px;border-radius:99px;font-size:12px;font-weight:700;background:var(--acc-soft);color:var(--acc)}
+.badge.low{background:var(--bad-soft);color:var(--bad)}.badge.medium{background:var(--warn-soft);color:var(--warn)}
+a{color:var(--acc)}
+</style>
+</head>
+<body>
+<main id="app"></main>
+<nav class="tabs" id="tabs"></nav>
+<div id="toast" role="status"></div>
+
+<script>
+'use strict';
+(function () {
+
+/* ============ Konstantes ============ */
+var LS_KEY = 'kalorijas_v1';
+var DEFAULTS = { apiKey: '', model: 'gemini-2.5-flash', goal: 2000 };
+var MEALS = [
+  ['brokastis', 'Brokastis', '🌅'],
+  ['pusdienas', 'Pusdienas', '☀️'],
+  ['vakarinas', 'Vakariņas', '🌙'],
+  ['uzkodas', 'Uzkodas', '🍎']
+];
+var WEEKDAYS = ['svētdiena', 'pirmdiena', 'otrdiena', 'trešdiena', 'ceturtdiena', 'piektdiena', 'sestdiena'];
+var WEEKDAYS_SHORT = ['Sv', 'Pr', 'Ot', 'Tr', 'Ce', 'Pk', 'Se'];
+var MONTHS = ['janvāris', 'februāris', 'marts', 'aprīlis', 'maijs', 'jūnijs', 'jūlijs', 'augusts', 'septembris', 'oktobris', 'novembris', 'decembris'];
+var CONF_LV = { low: 'Zema pārliecība', medium: 'Vidēja pārliecība', high: 'Augsta pārliecība' };
+
+var SCHEMA = {
+  type: 'OBJECT',
+  properties: {
+    is_food: { type: 'BOOLEAN' },
+    meal_name: { type: 'STRING' },
+    confidence: { type: 'STRING', enum: ['low', 'medium', 'high'] },
+    notes: { type: 'STRING' },
+    items: {
+      type: 'ARRAY',
+      items: {
+        type: 'OBJECT',
+        properties: {
+          name: { type: 'STRING' },
+          grams: { type: 'NUMBER' },
+          kcal: { type: 'NUMBER' },
+          protein_g: { type: 'NUMBER' },
+          carbs_g: { type: 'NUMBER' },
+          fat_g: { type: 'NUMBER' }
+        },
+        required: ['name', 'grams', 'kcal', 'protein_g', 'carbs_g', 'fat_g']
+      }
+    }
+  },
+  required: ['is_food', 'meal_name', 'confidence', 'notes', 'items']
+};
+
+/* ============ Palīgfunkcijas ============ */
+function $(s) { return document.querySelector(s); }
+function pad(n) { return String(n).padStart(2, '0'); }
+function ymd(d) { return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate()); }
+function parseYmd(s) { var p = s.split('-').map(Number); return new Date(p[0], p[1] - 1, p[2]); }
+function addDays(s, n) { var d = parseYmd(s); d.setDate(d.getDate() + n); return ymd(d); }
+function today() { return ymd(new Date()); }
+function num(v) {
+  var n = typeof v === 'string' ? parseFloat(v.replace(',', '.')) : Number(v);
+  return isFinite(n) && n > 0 ? n : 0;
+}
+function r0(n) { return Math.round(n); }
+function r1(n) { return Math.round(n * 10) / 10; }
+function fmt(n) { return Math.round(n).toLocaleString('lv-LV'); }
+function uid() { return Date.now().toString(36) + Math.random().toString(36).slice(2, 7); }
+function mealByHour(h) {
+  if (h < 10) return 'brokastis';
+  if (h < 15) return 'pusdienas';
+  if (h < 17) return 'uzkodas';
+  if (h < 22) return 'vakarinas';
+  return 'uzkodas';
+}
+function dayLabel(s) {
+  var d = parseYmd(s);
+  var main = d.getDate() + '. ' + MONTHS[d.getMonth()];
+  var sub = WEEKDAYS[d.getDay()];
+  if (s === today()) sub = 'šodien, ' + sub;
+  else if (s === addDays(today(), -1)) sub = 'vakar, ' + sub;
+  return { main: main, sub: sub };
+}
+
+/* mazs DOM palīgs (bez innerHTML — lietotāja teksts vienmēr ir tikai teksts) */
+function h(tag, props) {
+  var el = document.createElement(tag);
+  var pendingValue;
+  if (props) {
+    Object.keys(props).forEach(function (k) {
+      var v = props[k];
+      if (v === undefined || v === null || v === false) return;
+      if (k === 'class') el.className = v;
+      else if (k === 'value') pendingValue = v;
+      else if (k === 'style' && typeof v === 'object') Object.assign(el.style, v);
+      else if (k.slice(0, 2) === 'on' && typeof v === 'function') el.addEventListener(k.slice(2), v);
+      else el.setAttribute(k, v === true ? '' : v);
+    });
+  }
+  function add(k) {
+    if (k === null || k === undefined || k === false) return;
+    if (Array.isArray(k)) { k.forEach(add); return; }
+    el.append(k.nodeType ? k : document.createTextNode(String(k)));
+  }
+  for (var i = 2; i < arguments.length; i++) add(arguments[i]);
+  if (pendingValue !== undefined) el.value = pendingValue;
+  return el;
+}
+
+var toastTimer;
+function toast(msg) {
+  var t = $('#toast');
+  t.textContent = msg;
+  t.classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(function () { t.classList.remove('show'); }, 2600);
+}
+
+/* ============ Dati (localStorage) ============ */
+var db = load();
+function load() {
+  try {
+    var r = JSON.parse(localStorage.getItem(LS_KEY));
+    if (r && Array.isArray(r.entries)) {
+      return { settings: Object.assign({}, DEFAULTS, r.settings || {}), entries: r.entries };
+    }
+  } catch (e) { /* tukšs */ }
+  return { settings: Object.assign({}, DEFAULTS), entries: [] };
+}
+function save() {
+  try { localStorage.setItem(LS_KEY, JSON.stringify(db)); }
+  catch (e) { toast('Neizdevās saglabāt datus (vieta pilna?)'); }
+}
+
+/* ============ Stāvoklis ============ */
+var S = {
+  view: location.hash === '#scan' ? 'scan' : (db.settings.apiKey ? 'today' : 'settings'),
+  day: today(),
+  draft: null,
+  note: '',
+  open: {},
+  delId: null,
+  keyVisible: false,
+  clearArmed: false,
+  testMsg: null,
+  installDismissed: false
+};
+var T = null; // kopsummu elementu atsauces skenēšanas skatā
+
+/* ============ Instalēšana (PWA) ============ */
+var deferredInstall = null;
+function isStandalone() {
+  return (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches) || navigator.standalone === true;
+}
+function isIOS() {
+  return /iphone|ipad|ipod/i.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+}
+function doInstall() {
+  if (!deferredInstall) return;
+  var ev = deferredInstall;
+  ev.prompt();
+  ev.userChoice.then(function () { deferredInstall = null; render(); }, function () { deferredInstall = null; render(); });
+}
+window.addEventListener('beforeinstallprompt', function (e) {
+  e.preventDefault();
+  deferredInstall = e;
+  if (S.view !== 'scan') render();
+});
+window.addEventListener('appinstalled', function () {
+  deferredInstall = null;
+  toast('Aplikācija uzstādīta');
+  if (S.view !== 'scan') render();
+});
+function installCard() {
+  if (isStandalone()) return h('div', { class: 'notice ok' }, '✓ Aplikācija ir uzstādīta šajā ierīcē.');
+  var box = h('div', { class: 'card stack' }, h('b', null, '📲 Uzstādīt kā aplikāciju'));
+  if (deferredInstall) {
+    box.append(h('div', { class: 'small muted' }, 'Pievienosies sākuma ekrānam ar kruasāna ikonu un atvērsies pilnā ekrānā, bez pārlūka joslas.'),
+      h('button', { class: 'btn pri', onclick: doInstall }, '⬇ Instalēt aplikāciju'));
+  } else if (!/^https?:$/.test(location.protocol)) {
+    box.append(h('div', { class: 'small muted' }, 'Instalēšanai aplikācija jāatver no tīmekļa adreses (HTTPS), nevis kā lokāls fails.'));
+  } else if (isIOS()) {
+    box.append(h('div', { class: 'small muted' }, 'iPhone/iPad: Safari → ikona „Kopīgot” → „Pievienot sākuma ekrānam”.'));
+  } else {
+    box.append(h('div', { class: 'small muted' }, 'Pārlūka izvēlnē (⋮) izvēlies „Instalēt aplikāciju” vai „Pievienot sākuma ekrānam”.'));
+  }
+  return box;
+}
+
+/* ============ Ēdiena vienības ============ */
+function blankItem() {
+  return { name: '', grams: 0, kcal: 0, p: 0, c: 0, f: 0, per: null };
+}
+function mkItem(o) {
+  var it = {
+    name: String(o.name || 'Produkts').slice(0, 80),
+    grams: r1(num(o.grams)),
+    kcal: r0(num(o.kcal)),
+    p: r1(num(o.protein_g)),
+    c: r1(num(o.carbs_g)),
+    f: r1(num(o.fat_g)),
+    per: null
+  };
+  if (it.grams > 0) it.per = { kcal: it.kcal / it.grams, p: it.p / it.grams, c: it.c / it.grams, f: it.f / it.grams };
+  return it;
+}
+function sumItems(items) {
+  return items.reduce(function (a, i) {
+    return { kcal: a.kcal + (i.kcal || 0), p: a.p + (i.p || 0), c: a.c + (i.c || 0), f: a.f + (i.f || 0) };
+  }, { kcal: 0, p: 0, c: 0, f: 0 });
+}
+function dayEntries(day) {
+  return db.entries.filter(function (e) { return e.date === day; })
+    .sort(function (a, b) { return (a.ts || 0) - (b.ts || 0); });
+}
+function sumEntries(list) { return sumItems(list); }
+
+/* ============ Attēla apstrāde ============ */
+function loadImage(file) {
+  return new Promise(function (res, rej) {
+    var url = URL.createObjectURL(file);
+    var img = new Image();
+    img.onload = function () { res({ img: img, url: url }); };
+    img.onerror = function () { URL.revokeObjectURL(url); rej(new Error('Neizdevās nolasīt attēlu. Mēģini JPG vai PNG.')); };
+    img.src = url;
+  });
+}
+function scaleTo(img, max, q) {
+  var w = img.naturalWidth, hh = img.naturalHeight;
+  var k = Math.min(1, max / Math.max(w, hh));
+  var c = document.createElement('canvas');
+  c.width = Math.max(1, Math.round(w * k));
+  c.height = Math.max(1, Math.round(hh * k));
+  c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+  return c.toDataURL('image/jpeg', q);
+}
+function onFile(file) {
+  if (!file) return;
+  loadImage(file).then(function (r) {
+    var full = scaleTo(r.img, 1280, 0.85);
+    var thumb = scaleTo(r.img, 160, 0.6);
+    URL.revokeObjectURL(r.url);
+    S.draft = newDraft(full, thumb);
+    S.view = 'scan';
+    render();
+    runAnalysis();
+  }).catch(function (e) { toast(e.message); });
+}
+function newDraft(img, thumb) {
+  return {
+    img: img, thumb: thumb, status: img ? 'loading' : 'done', error: '',
+    name: '', meal: mealByHour(new Date().getHours()), date: today(),
+    items: img ? [] : [blankItem()], conf: '', notes: '', isFood: true
+  };
+}
+
+/* ============ Gemini ============ */
+function buildPrompt(note) {
+  return 'You are a careful nutrition assistant. The photo shows a single meal or food portion.\n' +
+    '1. Identify every distinct food or drink item you can see (list sauces, oils, spreads and side items separately when visible).\n' +
+    '2. Estimate the weight of each item in grams, using visual cues such as plate or bowl size (a dinner plate is usually 24-27 cm), cutlery, hands, packaging and food thickness.\n' +
+    '3. Give calories (kcal) and macronutrients in grams for that exact portion. Keep kcal roughly consistent with protein*4 + carbs*4 + fat*9.\n' +
+    '4. Include hidden calories when likely (cooking oil, dressing, butter) and mention such assumptions in "notes".\n' +
+    '5. If the image is not food, set is_food to false and return an empty items array.\n' +
+    'Write item names, meal_name and notes in Latvian. meal_name is a short name for the whole meal. confidence is "low", "medium" or "high".\n' +
+    (note ? 'The user adds this information, which takes priority over your visual estimate: "' + note + '"\n' : '') +
+    'Respond ONLY with JSON in this shape: {"is_food":true,"meal_name":"","confidence":"medium","notes":"","items":[{"name":"","grams":0,"kcal":0,"protein_g":0,"carbs_g":0,"fat_g":0}]}';
+}
+function modelName() {
+  return String(db.settings.model || DEFAULTS.model).trim().replace(/^models\//, '');
+}
+function callGemini(body) {
+  var ctrl = new AbortController();
+  var t = setTimeout(function () { ctrl.abort(); }, 60000);
+  return fetch('https://generativelanguage.googleapis.com/v1beta/models/' + encodeURIComponent(modelName()) + ':generateContent', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'x-goog-api-key': String(db.settings.apiKey).trim() },
+    body: JSON.stringify(body),
+    signal: ctrl.signal
+  }).then(function (r) { clearTimeout(t); return r; }, function (e) { clearTimeout(t); throw e; });
+}
+function apiErrorText(status, msg) {
+  if (status === 400 && /api key/i.test(msg)) return 'API atslēga nav derīga. Pārbaudi to iestatījumos.';
+  if (status === 401 || status === 403) return 'Piekļuve liegta — atslēga nav derīga vai nav atļauta. ' + msg;
+  if (status === 404) return 'Modelis "' + modelName() + '" nav atrasts. Nomaini modeļa nosaukumu iestatījumos.';
+  if (status === 429) return 'Sasniegts Gemini pieprasījumu limits. Pagaidi minūti un mēģini vēlreiz.';
+  if (status >= 500) return 'Gemini serveris īslaicīgi nav pieejams. Mēģini vēlreiz.';
+  return 'Kļūda ' + status + (msg ? ': ' + msg : '');
+}
+function readError(res) {
+  return res.json().then(function (j) { return (j && j.error && j.error.message) || ''; }, function () { return ''; });
+}
+function parseJson(text) {
+  var t = String(text).trim().replace(/^```(?:json)?\s*/i, '').replace(/```$/, '').trim();
+  var a = t.indexOf('{'), b = t.lastIndexOf('}');
+  if (a >= 0 && b > a) t = t.slice(a, b + 1);
+  return JSON.parse(t);
+}
+function analyzeImage(dataUrl, note) {
+  if (!String(db.settings.apiKey).trim()) {
+    return Promise.reject(new Error('Nav ievadīta Gemini API atslēga. Ievadi to iestatījumos.'));
+  }
+  var body = {
+    contents: [{ role: 'user', parts: [
+      { text: buildPrompt(note) },
+      { inlineData: { mimeType: 'image/jpeg', data: dataUrl.split(',')[1] } }
+    ] }],
+    generationConfig: { temperature: 0.2, responseMimeType: 'application/json', responseSchema: SCHEMA }
+  };
+  return callGemini(body).then(function (res) {
+    if (res.ok) return res;
+    return readError(res).then(function (msg) {
+      if (res.status === 400 && !/api key/i.test(msg)) {
+        // modelis, iespējams, neatbalsta shēmu — mēģinām bez tās
+        delete body.generationConfig.responseSchema;
+        return callGemini(body).then(function (res2) {
+          if (res2.ok) return res2;
+          return readError(res2).then(function (m2) { throw new Error(apiErrorText(res2.status, m2)); });
+        });
+      }
+      throw new Error(apiErrorText(res.status, msg));
+    });
+  }).then(function (res) { return res.json(); }).then(function (data) {
+    var cand = data && data.candidates && data.candidates[0];
+    var parts = cand && cand.content && cand.content.parts;
+    var text = parts ? parts.map(function (p) { return p.text || ''; }).join('') : '';
+    if (!text) {
+      var why = (data && data.promptFeedback && data.promptFeedback.blockReason) || (cand && cand.finishReason) || 'tukša atbilde';
+      throw new Error('Modelis neatgrieza rezultātu (' + why + '). Mēģini vēlreiz.');
+    }
+    var j;
+    try { j = parseJson(text); } catch (e) { throw new Error('Neizdevās nolasīt modeļa atbildi. Mēģini vēlreiz.'); }
+    return {
+      is_food: j.is_food !== false,
+      meal_name: String(j.meal_name || ''),
+      confidence: ['low', 'medium', 'high'].indexOf(j.confidence) >= 0 ? j.confidence : 'medium',
+      notes: String(j.notes || ''),
+      items: Array.isArray(j.items) ? j.items : []
+    };
+  }).catch(function (e) {
+    if (e && e.name === 'AbortError') throw new Error('Pieprasījums aizņēma pārāk ilgi. Mēģini vēlreiz.');
+    if (e instanceof TypeError) throw new Error('Nav savienojuma ar Gemini. Pārbaudi internetu.');
+    throw e;
+  });
+}
+function runAnalysis() {
+  var d = S.draft;
+  if (!d || !d.img) return;
+  d.status = 'loading';
+  d.error = '';
+  render();
+  analyzeImage(d.img, (S.note || '').trim()).then(function (r) {
+    if (S.draft !== d) return;
+    d.name = r.meal_name || d.name;
+    d.items = r.items.map(mkItem);
+    d.conf = r.confidence;
+    d.notes = r.notes;
+    d.isFood = r.is_food;
+    if (!d.items.length) d.items = [blankItem()];
+    d.status = 'done';
+    render();
+  }).catch(function (e) {
+    if (S.draft !== d) return;
+    d.status = 'error';
+    d.error = (e && e.message) || String(e);
+    render();
+  });
+}
+
+/* ============ Saglabāšana žurnālā ============ */
+function saveDraft() {
+  var d = S.draft;
+  var items = d.items
+    .filter(function (it) { return it.name.trim() || it.kcal > 0; })
+    .map(function (it) {
+      return { name: it.name.trim() || 'Produkts', grams: r0(it.grams), kcal: r0(it.kcal), p: r1(it.p), c: r1(it.c), f: r1(it.f) };
+    });
+  if (!items.length) { toast('Pievieno vismaz vienu produktu'); return; }
+  var tot = sumItems(items);
+  var now = new Date();
+  var when = parseYmd(d.date);
+  when.setHours(now.getHours(), now.getMinutes(), now.getSeconds());
+  db.entries.push({
+    id: uid(), date: d.date, ts: when.getTime(), meal: d.meal,
+    name: (d.name || '').trim() || items.map(function (i) { return i.name; }).join(', ').slice(0, 60),
+    items: items, kcal: r0(tot.kcal), p: r1(tot.p), c: r1(tot.c), f: r1(tot.f),
+    thumb: d.thumb || null
+  });
+  save();
+  S.day = d.date;
+  S.draft = null;
+  S.note = '';
+  S.view = 'today';
+  toast('Saglabāts žurnālā');
+  render();
+}
+
+/* ============ Skati ============ */
+function render() {
+  var app = $('#app');
+  T = null;
+  var v = S.view === 'today' ? viewToday() : S.view === 'scan' ? viewScan() : viewSettings();
+  app.replaceChildren(v);
+  renderTabs();
+}
+function renderTabs() {
+  var defs = [['today', '📅', 'Žurnāls'], ['scan', '📷', 'Skenēt'], ['settings', '⚙️', 'Iestatījumi']];
+  $('#tabs').replaceChildren.apply($('#tabs'), defs.map(function (t) {
+    return h('button', { class: S.view === t[0] ? 'on' : '', onclick: function () { S.view = t[0]; render(); window.scrollTo(0, 0); } },
+      h('span', { class: 'ti' }, t[1]), t[2]);
+  }));
+}
+
+/* ---------- Žurnāls ---------- */
+function viewToday() {
+  var list = dayEntries(S.day);
+  var tot = sumEntries(list);
+  var goal = num(db.settings.goal);
+  var lbl = dayLabel(S.day);
+  var wrap = h('div', { class: 'stack' });
+
+  if (deferredInstall && !S.installDismissed && !isStandalone()) {
+    wrap.append(h('div', { class: 'notice ok row' },
+      h('div', { class: 'grow small' }, '🥐 Uzstādi aplikāciju sākuma ekrānā'),
+      h('button', { class: 'btn sm pri', onclick: doInstall }, 'Instalēt'),
+      h('button', { class: 'btn sm', 'aria-label': 'Aizvērt', onclick: function () { S.installDismissed = true; render(); } }, '✕')));
+  }
+
+  wrap.append(h('div', { class: 'daynav' },
+    h('button', { class: 'arrow', 'aria-label': 'Iepriekšējā diena', onclick: function () { S.day = addDays(S.day, -1); render(); } }, '‹'),
+    h('div', { class: 'lbl' }, h('b', null, lbl.main), h('span', { class: 'muted small' }, lbl.sub)),
+    h('button', { class: 'arrow', 'aria-label': 'Nākamā diena', onclick: function () { S.day = addDays(S.day, 1); render(); } }, '›')
+  ));
+  if (S.day !== today()) {
+    wrap.append(h('button', { class: 'btn sm', onclick: function () { S.day = today(); render(); } }, 'Atgriezties uz šodienu'));
+  }
+
+  var pct = goal ? Math.min(100, tot.kcal / goal * 100) : 0;
+  var left = goal - tot.kcal;
+  var summary = h('div', { class: 'card' },
+    h('div', { class: 'big-kcal' }, fmt(tot.kcal), ' ', h('small', null, goal ? '/ ' + fmt(goal) + ' kcal' : 'kcal')));
+  if (goal) {
+    summary.append(
+      h('div', { class: 'bar' + (left < 0 ? ' over' : '') }, h('i', { style: { width: pct + '%' } })),
+      h('div', { class: 'small ' + (left < 0 ? '' : 'muted'), style: left < 0 ? { color: 'var(--bad)' } : {} },
+        left >= 0 ? 'Atlicis ' + fmt(left) + ' kcal' : 'Pārsniegts par ' + fmt(-left) + ' kcal'));
+  }
+  summary.append(h('div', { class: 'chips' },
+    macroChip('var(--p)', 'Olbaltumv.', tot.p),
+    macroChip('var(--c)', 'Ogļhidr.', tot.c),
+    macroChip('var(--f)', 'Tauki', tot.f)));
+  wrap.append(summary);
+
+  if (!list.length) {
+    wrap.append(h('div', { class: 'card', style: { textAlign: 'center' } },
+      h('div', { style: { fontSize: '40px' } }, '🍽️'),
+      h('p', { class: 'muted' }, 'Šajā dienā vēl nav ierakstu.'),
+      h('button', { class: 'btn pri', onclick: function () { S.view = 'scan'; render(); } }, '📷 Pievienot ēdienu')));
+  } else {
+    MEALS.forEach(function (m) {
+      var ms = list.filter(function (e) { return e.meal === m[0]; });
+      if (!ms.length) return;
+      var mk = sumEntries(ms).kcal;
+      wrap.append(h('h2', null, m[2] + ' ' + m[1] + ' · ' + fmt(mk) + ' kcal'));
+      ms.forEach(function (e) { wrap.append(entryCard(e)); });
+    });
+  }
+
+  wrap.append(h('h2', null, 'Pēdējās 7 dienas'), h('div', { class: 'card' }, weekChart()));
+  return wrap;
+}
+function macroChip(color, label, grams) {
+  return h('div', { class: 'chip' }, h('i', { style: { background: color } }), label, h('b', null, r1(grams) + ' g'));
+}
+function weekChart() {
+  var days = [];
+  for (var i = 6; i >= 0; i--) days.push(addDays(S.day, -i));
+  var vals = days.map(function (d) { return sumEntries(dayEntries(d)).kcal; });
+  var goal = num(db.settings.goal);
+  var max = Math.max.apply(null, vals.concat([goal, 1]));
+  return h('div', { class: 'week' }, days.map(function (d, i) {
+    var over = goal && vals[i] > goal;
+    var hp = vals[i] > 0 ? Math.max(4, vals[i] / max * 100) : 0;
+    return h('button', { class: 'wcol' + (d === S.day ? ' sel' : ''), onclick: function () { S.day = d; render(); } },
+      h('div', { class: 'wbar-wrap' }, h('div', { class: 'wbar' + (over ? ' over' : ''), style: { height: hp + '%' } })),
+      h('div', null, WEEKDAYS_SHORT[parseYmd(d).getDay()]),
+      h('div', null, vals[i] ? fmt(vals[i]) : '–'));
+  }));
+}
+function entryCard(e) {
+  var opened = !!S.open[e.id];
+  var t = new Date(e.ts || 0);
+  var time = pad(t.getHours()) + ':' + pad(t.getMinutes());
+  var box = h('div', null);
+  box.append(h('div', { class: 'entry', style: opened ? { borderRadius: '14px 14px 0 0' } : {}, onclick: function () {
+      S.open[e.id] = !opened; S.delId = null; render();
+    } },
+    e.thumb ? h('img', { class: 'thumb', src: e.thumb, alt: '' }) : h('div', { class: 'thumb' }, '🍴'),
+    h('div', { class: 'ent-main' },
+      h('div', { class: 'ent-name' }, e.name),
+      h('div', { class: 'muted small' }, time + ' · ' + e.items.length + ' prod.')),
+    h('div', { class: 'ent-kcal' }, fmt(e.kcal), h('small', null, 'kcal'))));
+  if (opened) {
+    var det = h('div', { class: 'detail' });
+    e.items.forEach(function (it) {
+      det.append(h('div', { class: 'li' },
+        h('span', null, it.name + (it.grams ? ' · ' + fmt(it.grams) + ' g' : '')),
+        h('b', null, fmt(it.kcal) + ' kcal')));
+    });
+    det.append(h('div', { class: 'muted small', style: { margin: '6px 0 10px' } },
+      'Olb. ' + r1(e.p) + ' g · Ogļ. ' + r1(e.c) + ' g · Tauk. ' + r1(e.f) + ' g'));
+    var armed = S.delId === e.id;
+    det.append(h('div', { class: 'row wrap' },
+      h('button', { class: 'btn sm danger', onclick: function (ev) {
+        ev.stopPropagation();
+        if (!armed) { S.delId = e.id; render(); return; }
+        db.entries = db.entries.filter(function (x) { return x.id !== e.id; });
+        S.delId = null; save(); toast('Dzēsts'); render();
+      } }, armed ? 'Vēlreiz — dzēst' : '🗑 Dzēst'),
+      e.date !== today() ? h('button', { class: 'btn sm', onclick: function (ev) {
+        ev.stopPropagation();
+        var copy = JSON.parse(JSON.stringify(e));
+        copy.id = uid(); copy.date = today(); copy.ts = Date.now();
+        db.entries.push(copy); save(); toast('Pievienots šodienai');
+        S.day = today(); render();
+      } }, '＋ Uz šodienu') : null));
+    box.append(det);
+  }
+  return box;
+}
+
+/* ---------- Skenēšana ---------- */
+function updateTotals() {
+  if (!T || !S.draft) return;
+  var s = sumItems(S.draft.items);
+  T.kcal.textContent = fmt(s.kcal);
+  T.macros.textContent = 'Olb. ' + r1(s.p) + ' g · Ogļ. ' + r1(s.c) + ' g · Tauk. ' + r1(s.f) + ' g';
+}
+function viewScan() {
+  var d = S.draft;
+  var wrap = h('div', { class: 'stack' });
+  wrap.append(h('h1', null, 'Skenēt ēdienu'));
+
+  var noteBox = h('div', null,
+    h('label', { class: 'f' }, 'Piezīme (nav obligāta) — piem. „250 g”, „ar sviestu”, „bez cukura”'),
+    h('textarea', { class: 'in', rows: '2', placeholder: 'Precizējums, ko modelis ņems vērā',
+      value: S.note, oninput: function (e) { S.note = e.target.value; } }));
+
+  if (!d) {
+    if (!String(db.settings.apiKey).trim()) {
+      wrap.append(h('div', { class: 'notice' }, 'Lai analizētu foto, vajadzīga bezmaksas Gemini API atslēga. ',
+        h('a', { href: '#', onclick: function (e) { e.preventDefault(); S.view = 'settings'; render(); } }, 'Ievadi to iestatījumos.')));
+    }
+    wrap.append(noteBox);
+    wrap.append(h('div', { class: 'row' },
+      h('label', { class: 'btn big pri' }, h('span', { class: 'ico' }, '📷'), 'Nofotografēt',
+        h('input', { type: 'file', accept: 'image/*', capture: 'environment', hidden: true,
+          onchange: function (e) { onFile(e.target.files[0]); } })),
+      h('label', { class: 'btn big' }, h('span', { class: 'ico' }, '🖼️'), 'No galerijas',
+        h('input', { type: 'file', accept: 'image/*', hidden: true,
+          onchange: function (e) { onFile(e.target.files[0]); } }))));
+    wrap.append(h('button', { class: 'btn', onclick: function () { S.draft = newDraft(null, null); render(); } }, '✍️ Pievienot bez foto'));
+    wrap.append(h('div', { class: 'card small muted' },
+      h('b', { style: { color: 'var(--ink)' } }, 'Padomi precīzākam rezultātam'),
+      h('div', null, '• Fotografē no augšas vai leņķī, labā apgaismojumā.'),
+      h('div', null, '• Liec kadrā visu porciju un, ja iespējams, dakšiņu vai karoti mēroga noteikšanai.'),
+      h('div', null, '• Rezultāts ir aptuvens (parasti ±20–30 %). Pārbaudi un izlabo svarus zemāk.')));
+    return wrap;
+  }
+
+  if (d.img) {
+    wrap.append(h('img', { class: 'preview', src: d.img, alt: 'Ēdiena foto' }));
+  }
+
+  if (d.status === 'loading') {
+    wrap.append(h('div', { class: 'card row' }, h('div', { class: 'spin' }), h('div', null, 'Analizēju ēdienu…')));
+    wrap.append(h('button', { class: 'btn', onclick: function () { S.draft = null; render(); } }, 'Atcelt'));
+    return wrap;
+  }
+
+  if (d.status === 'error') {
+    wrap.append(h('div', { class: 'notice err' }, d.error));
+    wrap.append(noteBox);
+    wrap.append(h('div', { class: 'row wrap' },
+      h('button', { class: 'btn pri grow', onclick: runAnalysis }, '↻ Mēģināt vēlreiz'),
+      h('button', { class: 'btn grow', onclick: function () { d.status = 'done'; d.items = [blankItem()]; render(); } }, '✍️ Ievadīt pašam'),
+      h('button', { class: 'btn', onclick: function () { S.draft = null; render(); } }, 'Atcelt')));
+    return wrap;
+  }
+
+  /* status = done */
+  if (d.img && !d.isFood) {
+    wrap.append(h('div', { class: 'notice' }, 'Šķiet, ka foto nav ēdiens. Vari pievienot produktus pats vai nofotografēt vēlreiz.'));
+  }
+  if (d.img && d.isFood) {
+    wrap.append(h('div', { class: 'row wrap' },
+      h('span', { class: 'badge ' + d.conf }, CONF_LV[d.conf] || CONF_LV.medium),
+      h('span', { class: 'muted small' }, 'Aptuvens novērtējums — pārbaudi svarus')));
+    if (d.notes) wrap.append(h('div', { class: 'notice ok small' }, d.notes));
+  }
+
+  wrap.append(h('div', null,
+    h('label', { class: 'f' }, 'Ieraksta nosaukums'),
+    h('input', { class: 'in', type: 'text', value: d.name, placeholder: 'piem., Vistas fileja ar rīsiem',
+      oninput: function (e) { d.name = e.target.value; } })));
+
+  var itemsBox = h('div', { class: 'stack' });
+  function rebuildItems() {
+    itemsBox.replaceChildren.apply(itemsBox, d.items.map(function (it) {
+      return itemRow(it, function () {
+        d.items.splice(d.items.indexOf(it), 1);
+        rebuildItems(); updateTotals();
+      });
+    }));
+  }
+  rebuildItems();
+  wrap.append(h('h2', null, 'Sastāvdaļas'), itemsBox);
+  wrap.append(h('button', { class: 'btn sm', onclick: function () {
+    d.items.push(blankItem()); rebuildItems(); updateTotals();
+  } }, '＋ Pievienot sastāvdaļu'));
+
+  var tk = h('div', { class: 'tk' }), tm = h('div', { class: 'muted small', style: { marginTop: '6px' } });
+  T = { kcal: tk, macros: tm };
+  wrap.append(h('div', { class: 'totals' }, h('div', { class: 'small muted' }, 'Kopā'),
+    h('div', { class: 'row', style: { alignItems: 'baseline', gap: '6px' } }, tk, h('span', { class: 'muted' }, 'kcal')), tm));
+  updateTotals();
+
+  if (d.img) {
+    wrap.append(noteBox);
+    wrap.append(h('button', { class: 'btn sm', onclick: runAnalysis }, '↻ Analizēt vēlreiz ar piezīmi'));
+  }
+
+  var mealSel = h('select', { class: 'in', value: d.meal, onchange: function (e) { d.meal = e.target.value; } },
+    MEALS.map(function (m) { return h('option', { value: m[0] }, m[2] + ' ' + m[1]); }));
+  var dateIn = h('input', { class: 'in', type: 'date', value: d.date, onchange: function (e) { if (e.target.value) d.date = e.target.value; } });
+  wrap.append(h('div', { class: 'row' },
+    h('div', { class: 'grow' }, h('label', { class: 'f' }, 'Ēdienreize'), mealSel),
+    h('div', { class: 'grow' }, h('label', { class: 'f' }, 'Datums'), dateIn)));
+
+  wrap.append(h('div', { class: 'row' },
+    h('button', { class: 'btn pri grow', onclick: saveDraft }, '✓ Saglabāt žurnālā'),
+    h('button', { class: 'btn', onclick: function () { S.draft = null; render(); } }, 'Atcelt')));
+  return wrap;
+}
+function itemRow(it, onRemove) {
+  var nameI = h('input', { class: 'in', type: 'text', value: it.name, placeholder: 'Produkts',
+    oninput: function () { it.name = nameI.value; } });
+  var gI = h('input', { class: 'in num', type: 'text', inputmode: 'decimal', placeholder: '0', value: it.grams ? String(it.grams) : '' });
+  var kI = h('input', { class: 'in num', type: 'text', inputmode: 'decimal', placeholder: '0', value: it.kcal ? String(it.kcal) : '' });
+  var mac = h('div', { class: 'macros' });
+  function paint() { mac.textContent = 'Olb. ' + r1(it.p) + ' g · Ogļ. ' + r1(it.c) + ' g · Tauk. ' + r1(it.f) + ' g'; }
+  gI.addEventListener('input', function () {
+    var g = num(gI.value);
+    it.grams = g;
+    if (it.per && g > 0) {
+      it.kcal = r0(it.per.kcal * g);
+      it.p = r1(it.per.p * g);
+      it.c = r1(it.per.c * g);
+      it.f = r1(it.per.f * g);
+      kI.value = String(it.kcal);
+    }
+    paint(); updateTotals();
+  });
+  kI.addEventListener('input', function () {
+    it.kcal = r0(num(kI.value));
+    if (it.grams > 0) {
+      it.per = it.per || { kcal: 0, p: 0, c: 0, f: 0 };
+      it.per.kcal = it.kcal / it.grams;
+    }
+    updateTotals();
+  });
+  paint();
+  return h('div', { class: 'item' },
+    h('div', { class: 'row' }, nameI,
+      h('button', { class: 'x', 'aria-label': 'Noņemt', onclick: onRemove }, '✕')),
+    h('div', { class: 'row' },
+      h('label', { class: 'unit' }, gI, h('span', null, 'g')),
+      h('label', { class: 'unit' }, kI, h('span', null, 'kcal'))),
+    mac);
+}
+
+/* ---------- Iestatījumi ---------- */
+function viewSettings() {
+  var s = db.settings;
+  var wrap = h('div', { class: 'stack' });
+  wrap.append(h('h1', null, 'Iestatījumi'));
+  wrap.append(installCard());
+
+  if (!String(s.apiKey).trim()) {
+    wrap.append(h('div', { class: 'notice' },
+      h('b', null, 'Pirmā palaišana. '),
+      'Foto analīzei tiek izmantots Google Gemini. Bezmaksas atslēgu vari izveidot šeit: ',
+      h('a', { href: 'https://aistudio.google.com/apikey', target: '_blank', rel: 'noopener' }, 'aistudio.google.com/apikey'),
+      '. Ielīmē to zemāk.'));
+  }
+
+  var keyIn = h('input', { class: 'in', type: S.keyVisible ? 'text' : 'password', value: s.apiKey,
+    autocomplete: 'off', autocapitalize: 'off', spellcheck: 'false', placeholder: 'AIza…',
+    onchange: function (e) { db.settings.apiKey = e.target.value.trim(); save(); S.testMsg = null; toast('Atslēga saglabāta'); } });
+  wrap.append(h('div', { class: 'card stack' },
+    h('div', null, h('label', { class: 'f' }, 'Gemini API atslēga'),
+      h('div', { class: 'row' }, keyIn,
+        h('button', { class: 'btn sm', onclick: function () { S.keyVisible = !S.keyVisible; render(); } }, S.keyVisible ? 'Slēpt' : 'Rādīt'))),
+    h('div', null, h('label', { class: 'f' }, 'Modelis'),
+      h('input', { class: 'in', type: 'text', value: s.model, list: 'models', autocapitalize: 'off', spellcheck: 'false',
+        onchange: function (e) { db.settings.model = e.target.value.trim() || DEFAULTS.model; save(); toast('Modelis saglabāts'); render(); } }),
+      h('datalist', { id: 'models' },
+        ['gemini-2.5-flash', 'gemini-2.5-flash-lite', 'gemini-2.5-pro'].map(function (m) { return h('option', { value: m }); })),
+      h('div', { class: 'small muted', style: { marginTop: '4px' } }, 'Ja modelis nav atrasts, ieraksti jaunāko Gemini Flash nosaukumu no Google AI Studio.')),
+    h('div', null, h('label', { class: 'f' }, 'Dienas mērķis (kcal)'),
+      h('input', { class: 'in', type: 'text', inputmode: 'numeric', value: s.goal ? String(s.goal) : '',
+        onchange: function (e) { db.settings.goal = r0(num(e.target.value)); save(); toast('Mērķis saglabāts'); } })),
+    h('div', { class: 'row wrap' },
+      h('button', { class: 'btn sm', onclick: testConnection }, '🔌 Pārbaudīt savienojumu'),
+      S.testMsg ? h('span', { class: 'small', style: { color: S.testMsg.ok ? 'var(--acc)' : 'var(--bad)' } }, S.testMsg.text) : null)));
+
+  var fileIn = h('input', { type: 'file', accept: 'application/json,.json', hidden: true,
+    onchange: function (e) { importJson(e.target.files[0]); } });
+  wrap.append(h('h2', null, 'Dati'),
+    h('div', { class: 'card stack' },
+      h('div', { class: 'small muted' }, 'Ieraksti glabājas tikai šajā ierīcē (pārlūka krātuvē). Dari rezerves kopiju laiku pa laikam.'),
+      h('div', { class: 'row wrap' },
+        h('button', { class: 'btn sm', onclick: exportCsv }, '⬇ CSV'),
+        h('button', { class: 'btn sm', onclick: exportJson }, '⬇ JSON kopija'),
+        h('label', { class: 'btn sm' }, '⬆ Importēt JSON', fileIn)),
+      h('button', { class: 'btn sm danger', onclick: function () {
+        if (!S.clearArmed) { S.clearArmed = true; render(); return; }
+        db.entries = []; save(); S.clearArmed = false; toast('Visi ieraksti izdzēsti'); render();
+      } }, S.clearArmed ? 'Vēlreiz — izdzēst VISUS ierakstus' : '🗑 Izdzēst visus ierakstus')));
+
+  wrap.append(h('div', { class: 'card small muted' },
+    h('b', { style: { color: 'var(--ink)' } }, 'Privātums. '),
+    'Foto tiek nosūtīts Google Gemini API analīzei. API atslēga glabājas tikai šajā ierīcē. ',
+    'Kaloriju vērtības ir aptuvenas un neaizstāj uztura speciālista vai ārsta padomu.'));
+  return wrap;
+}
+function testConnection() {
+  S.testMsg = { ok: true, text: 'Pārbaudu…' };
+  render();
+  var key = String(db.settings.apiKey).trim();
+  if (!key) { S.testMsg = { ok: false, text: 'Nav ievadīta atslēga.' }; render(); return; }
+  fetch('https://generativelanguage.googleapis.com/v1beta/models/' + encodeURIComponent(modelName()), {
+    headers: { 'x-goog-api-key': key }
+  }).then(function (res) {
+    if (res.ok) { S.testMsg = { ok: true, text: '✓ Savienojums darbojas' }; render(); return; }
+    return readError(res).then(function (m) { S.testMsg = { ok: false, text: apiErrorText(res.status, m) }; render(); });
+  }).catch(function () {
+    S.testMsg = { ok: false, text: 'Nav savienojuma ar Gemini.' }; render();
+  });
+}
+
+/* ============ Eksports / imports ============ */
+function download(name, mime, text) {
+  var url = URL.createObjectURL(new Blob([text], { type: mime }));
+  var a = h('a', { href: url, download: name });
+  document.body.append(a);
+  a.click();
+  a.remove();
+  setTimeout(function () { URL.revokeObjectURL(url); }, 3000);
+}
+function csvCell(v) {
+  var s = String(v === undefined || v === null ? '' : v);
+  return /[;"\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+}
+function exportCsv() {
+  var rows = [['Datums', 'Laiks', 'Ēdienreize', 'Ieraksts', 'Produkts', 'Grami', 'kcal', 'Olbaltumvielas g', 'Ogļhidrāti g', 'Tauki g']];
+  db.entries.slice().sort(function (a, b) { return (a.ts || 0) - (b.ts || 0); }).forEach(function (e) {
+    var t = new Date(e.ts || 0);
+    e.items.forEach(function (it) {
+      rows.push([e.date, pad(t.getHours()) + ':' + pad(t.getMinutes()), e.meal, e.name, it.name, it.grams, it.kcal, it.p, it.c, it.f]);
+    });
+  });
+  var text = rows.map(function (r) {
+    return r.map(function (c) { return csvCell(typeof c === 'number' ? String(c).replace('.', ',') : c); }).join(';');
+  }).join('\r\n');
+  download('kalorijas-' + today() + '.csv', 'text/csv;charset=utf-8', '﻿' + text);
+}
+function exportJson() {
+  download('kalorijas-kopija-' + today() + '.json', 'application/json',
+    JSON.stringify({ version: 1, settings: { model: db.settings.model, goal: db.settings.goal }, entries: db.entries }));
+}
+function importJson(file) {
+  if (!file) return;
+  var fr = new FileReader();
+  fr.onload = function () {
+    try {
+      var j = JSON.parse(fr.result);
+      if (!j || !Array.isArray(j.entries)) throw new Error('bad');
+      var have = {};
+      db.entries.forEach(function (e) { have[e.id] = true; });
+      var added = 0;
+      j.entries.forEach(function (e) {
+        if (e && e.id && e.date && Array.isArray(e.items) && !have[e.id]) { db.entries.push(e); have[e.id] = true; added++; }
+      });
+      if (j.settings && j.settings.goal && !db.settings.goal) db.settings.goal = num(j.settings.goal);
+      save();
+      toast('Importēti ieraksti: ' + added);
+      render();
+    } catch (e) { toast('Neizdevās importēt — nederīgs fails'); }
+  };
+  fr.readAsText(file);
+}
+
+/* ============ Starts ============ */
+window.addEventListener('hashchange', function () {
+  if (location.hash === '#scan') { S.view = 'scan'; render(); }
+});
+render();
+if ('serviceWorker' in navigator && /^https?:$/.test(location.protocol)) {
+  window.addEventListener('load', function () { navigator.serviceWorker.register('sw.js').catch(function () {}); });
+}
+
+})();
+</script>
+</body>
+</html>
