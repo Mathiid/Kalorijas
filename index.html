@@ -59,7 +59,7 @@ label.f{display:block;font-size:13px;color:var(--mute);margin-bottom:4px}
 .tabs button.on{color:var(--acc);font-weight:700}
 #toast{position:fixed;left:50%;bottom:calc(92px + env(safe-area-inset-bottom));transform:translateX(-50%) translateY(20px);
   background:#222;color:#fff;padding:10px 16px;border-radius:12px;font-size:14px;opacity:0;pointer-events:none;
-  transition:.2s;max-width:88vw;text-align:center;z-index:10}
+  transition:.2s;max-width:88vw;text-align:center;z-index:30}
 #toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
 /* dienas navigācija */
 .daynav{display:flex;align-items:center;gap:8px;margin-bottom:12px}
@@ -108,6 +108,16 @@ label.f{display:block;font-size:13px;color:var(--mute);margin-bottom:4px}
 .totals .tk{font-size:30px;font-weight:800;line-height:1}
 .badge{display:inline-block;padding:2px 9px;border-radius:99px;font-size:12px;font-weight:700;background:var(--acc-soft);color:var(--acc)}
 .badge.low{background:var(--bad-soft);color:var(--bad)}.badge.medium{background:var(--warn-soft);color:var(--warn)}
+.previews{display:flex;gap:8px}
+.previews img{flex:1;min-width:0;width:100%;max-height:260px;object-fit:cover;border-radius:14px;display:block}
+.item .x.star{color:var(--mute)}
+.item .x.star.on{color:#e0a82e}
+.chipbtn{font:inherit;border:1px solid var(--line);background:var(--card);color:var(--ink);border-radius:99px;padding:7px 12px;font-size:14px}
+.chipbtn.on{background:var(--acc);color:var(--acc-ink);border-color:var(--acc)}
+.sheet{position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:20;display:flex;align-items:flex-end;justify-content:center}
+.sheet .panel{background:var(--bg);width:100%;max-width:560px;max-height:88vh;overflow:auto;border-radius:20px 20px 0 0;padding:16px 16px calc(16px + env(safe-area-inset-bottom))}
+.cam{width:100%;max-height:300px;border-radius:14px;background:#000;object-fit:cover}
+input[type=checkbox]{width:20px;height:20px;accent-color:var(--acc);flex:none}
 a{color:var(--acc)}
 </style>
 </head>
@@ -122,7 +132,7 @@ a{color:var(--acc)}
 
 /* ============ Konstantes ============ */
 var LS_KEY = 'kalorijas_v1';
-var DEFAULTS = { apiKey: '', model: 'gemini-2.5-flash', goal: 2000 };
+var DEFAULTS = { apiKey: '', model: 'gemini-2.5-flash', goal: 2000, plateCm: 0 };
 var MEALS = [
   ['brokastis', 'Brokastis', '🌅'],
   ['pusdienas', 'Pusdienas', '☀️'],
@@ -141,6 +151,19 @@ var SCHEMA = {
     meal_name: { type: 'STRING' },
     confidence: { type: 'STRING', enum: ['low', 'medium', 'high'] },
     notes: { type: 'STRING' },
+    kcal_min: { type: 'NUMBER' },
+    kcal_max: { type: 'NUMBER' },
+    questions: {
+      type: 'ARRAY',
+      items: {
+        type: 'OBJECT',
+        properties: {
+          question: { type: 'STRING' },
+          options: { type: 'ARRAY', items: { type: 'STRING' } }
+        },
+        required: ['question', 'options']
+      }
+    },
     items: {
       type: 'ARRAY',
       items: {
@@ -157,7 +180,7 @@ var SCHEMA = {
       }
     }
   },
-  required: ['is_food', 'meal_name', 'confidence', 'notes', 'items']
+  required: ['is_food', 'meal_name', 'confidence', 'notes', 'kcal_min', 'kcal_max', 'questions', 'items']
 };
 
 /* ============ Palīgfunkcijas ============ */
@@ -231,10 +254,14 @@ function load() {
   try {
     var r = JSON.parse(localStorage.getItem(LS_KEY));
     if (r && Array.isArray(r.entries)) {
-      return { settings: Object.assign({}, DEFAULTS, r.settings || {}), entries: r.entries };
+      return {
+        settings: Object.assign({}, DEFAULTS, r.settings || {}),
+        entries: r.entries,
+        foods: Array.isArray(r.foods) ? r.foods : []
+      };
     }
   } catch (e) { /* tukšs */ }
-  return { settings: Object.assign({}, DEFAULTS), entries: [] };
+  return { settings: Object.assign({}, DEFAULTS), entries: [], foods: [] };
 }
 function save() {
   try { localStorage.setItem(LS_KEY, JSON.stringify(db)); }
@@ -252,7 +279,9 @@ var S = {
   keyVisible: false,
   clearArmed: false,
   testMsg: null,
-  installDismissed: false
+  installDismissed: false,
+  ref: '',
+  twoPhotos: false
 };
 var T = null; // kopsummu elementu atsauces skenēšanas skatā
 
@@ -308,7 +337,8 @@ function mkItem(o) {
     p: r1(num(o.protein_g)),
     c: r1(num(o.carbs_g)),
     f: r1(num(o.fat_g)),
-    per: null
+    per: null,
+    fav: false
   };
   if (it.grams > 0) it.per = { kcal: it.kcal / it.grams, p: it.p / it.grams, c: it.c / it.grams, f: it.f / it.grams };
   return it;
@@ -345,35 +375,45 @@ function scaleTo(img, max, q) {
 }
 function onFile(file) {
   if (!file) return;
-  loadImage(file).then(function (r) {
-    var full = scaleTo(r.img, 1280, 0.85);
-    var thumb = scaleTo(r.img, 160, 0.6);
-    URL.revokeObjectURL(r.url);
-    S.draft = newDraft(full, thumb);
+  readPhoto(file).then(function (p) {
+    S.draft = newDraft(p.full, p.thumb);
     S.view = 'scan';
     render();
-    runAnalysis();
+    if (S.draft.status === 'loading') runAnalysis();
   }).catch(function (e) { toast(e.message); });
 }
 function newDraft(img, thumb) {
   return {
-    img: img, thumb: thumb, status: img ? 'loading' : 'done', error: '',
+    img: img, img2: null, thumb: thumb,
+    status: img ? (S.twoPhotos ? 'second' : 'loading') : 'done', error: '',
     name: '', meal: mealByHour(new Date().getHours()), date: today(),
-    items: img ? [] : [blankItem()], conf: '', notes: '', isFood: true
+    items: img ? [] : [blankItem()], conf: '', notes: '', isFood: true,
+    questions: [], answers: [], hasRange: false, lo: 1, hi: 1, ref: getRef()
   };
 }
 
 /* ============ Gemini ============ */
-function buildPrompt(note) {
-  return 'You are a careful nutrition assistant. The photo shows a single meal or food portion.\n' +
+function buildPrompt(o) {
+  var ref = refText(o.ref);
+  var foods = foodsForPrompt();
+  var ans = (o.answers || []).map(function (a) { return '- ' + a.q + ' -> ' + a.a; }).join('\n');
+  return 'You are a careful nutrition assistant. ' +
+    (o.hasSecond
+      ? 'The first photo is a top-down or front view and the second photo is a side view of the same single meal; use both to judge portion height and volume.\n'
+      : 'The photo shows a single meal or food portion.\n') +
     '1. Identify every distinct food or drink item you can see (list sauces, oils, spreads and side items separately when visible).\n' +
     '2. Estimate the weight of each item in grams, using visual cues such as plate or bowl size (a dinner plate is usually 24-27 cm), cutlery, hands, packaging and food thickness.\n' +
     '3. Give calories (kcal) and macronutrients in grams for that exact portion. Keep kcal roughly consistent with protein*4 + carbs*4 + fat*9.\n' +
     '4. Include hidden calories when likely (cooking oil, dressing, butter) and mention such assumptions in "notes".\n' +
     '5. If the image is not food, set is_food to false and return an empty items array.\n' +
-    'Write item names, meal_name and notes in Latvian. meal_name is a short name for the whole meal. confidence is "low", "medium" or "high".\n' +
-    (note ? 'The user adds this information, which takes priority over your visual estimate: "' + note + '"\n' : '') +
-    'Respond ONLY with JSON in this shape: {"is_food":true,"meal_name":"","confidence":"medium","notes":"","items":[{"name":"","grams":0,"kcal":0,"protein_g":0,"carbs_g":0,"fat_g":0}]}';
+    '6. Give kcal_min and kcal_max: the realistic low and high total kcal for the whole meal, reflecting your uncertainty about portion size and hidden fats.\n' +
+    '7. Add up to 3 short clarifying questions in Latvian, each with 2-4 short answer options, ONLY about things you cannot see that could change the total by roughly 10% or more (for example cooking oil, sauce, sugar in a drink, fat content, bread and butter). Return an empty questions array if nothing important is unclear. Never ask about things already visible or already answered.\n' +
+    'Write item names, meal_name, notes and questions in Latvian. meal_name is a short name for the whole meal. confidence is "low", "medium" or "high".\n' +
+    (ref ? 'Scale reference: ' + ref + '. Use it to calibrate portion sizes.\n' : '') +
+    (foods ? 'The user\'s saved foods (values per 100 g). If a food in the photo matches one of them, use exactly that name:\n' + foods + '\n' : '') +
+    (ans ? 'The user answered these clarifying questions; the answers take priority over your visual estimate:\n' + ans + '\n' : '') +
+    (o.note ? 'The user adds this information, which takes priority over your visual estimate: "' + o.note + '"\n' : '') +
+    'Respond ONLY with JSON in this shape: {"is_food":true,"meal_name":"","confidence":"medium","notes":"","kcal_min":0,"kcal_max":0,"questions":[{"question":"","options":[""]}],"items":[{"name":"","grams":0,"kcal":0,"protein_g":0,"carbs_g":0,"fat_g":0}]}';
 }
 function modelName() {
   return String(db.settings.model || DEFAULTS.model).trim().replace(/^models\//, '');
@@ -405,15 +445,20 @@ function parseJson(text) {
   if (a >= 0 && b > a) t = t.slice(a, b + 1);
   return JSON.parse(t);
 }
-function analyzeImage(dataUrl, note) {
+function analyzeImage(d) {
   if (!String(db.settings.apiKey).trim()) {
     return Promise.reject(new Error('Nav ievadīta Gemini API atslēga. Ievadi to iestatījumos.'));
   }
+  var parts = [
+    { text: buildPrompt({ note: (S.note || '').trim(), ref: d.ref, answers: d.answers || [], hasSecond: !!d.img2 }) },
+    { inlineData: { mimeType: 'image/jpeg', data: d.img.split(',')[1] } }
+  ];
+  if (d.img2) {
+    parts.push({ text: 'Second photo (side view of the same meal):' });
+    parts.push({ inlineData: { mimeType: 'image/jpeg', data: d.img2.split(',')[1] } });
+  }
   var body = {
-    contents: [{ role: 'user', parts: [
-      { text: buildPrompt(note) },
-      { inlineData: { mimeType: 'image/jpeg', data: dataUrl.split(',')[1] } }
-    ] }],
+    contents: [{ role: 'user', parts: parts }],
     generationConfig: { temperature: 0.2, responseMimeType: 'application/json', responseSchema: SCHEMA }
   };
   return callGemini(body).then(function (res) {
@@ -431,19 +476,29 @@ function analyzeImage(dataUrl, note) {
     });
   }).then(function (res) { return res.json(); }).then(function (data) {
     var cand = data && data.candidates && data.candidates[0];
-    var parts = cand && cand.content && cand.content.parts;
-    var text = parts ? parts.map(function (p) { return p.text || ''; }).join('') : '';
+    var cparts = cand && cand.content && cand.content.parts;
+    var text = cparts ? cparts.map(function (p) { return p.text || ''; }).join('') : '';
     if (!text) {
       var why = (data && data.promptFeedback && data.promptFeedback.blockReason) || (cand && cand.finishReason) || 'tukša atbilde';
       throw new Error('Modelis neatgrieza rezultātu (' + why + '). Mēģini vēlreiz.');
     }
     var j;
     try { j = parseJson(text); } catch (e) { throw new Error('Neizdevās nolasīt modeļa atbildi. Mēģini vēlreiz.'); }
+    var qs = (Array.isArray(j.questions) ? j.questions : []).slice(0, 3).map(function (q) {
+      return {
+        q: String((q && q.question) || '').slice(0, 140),
+        options: (Array.isArray(q && q.options) ? q.options : []).slice(0, 4).map(function (o) { return String(o).slice(0, 40); }),
+        answer: ''
+      };
+    }).filter(function (q) { return q.q; });
     return {
       is_food: j.is_food !== false,
       meal_name: String(j.meal_name || ''),
       confidence: ['low', 'medium', 'high'].indexOf(j.confidence) >= 0 ? j.confidence : 'medium',
       notes: String(j.notes || ''),
+      kmin: num(j.kcal_min),
+      kmax: num(j.kcal_max),
+      questions: qs,
       items: Array.isArray(j.items) ? j.items : []
     };
   }).catch(function (e) {
@@ -458,13 +513,19 @@ function runAnalysis() {
   d.status = 'loading';
   d.error = '';
   render();
-  analyzeImage(d.img, (S.note || '').trim()).then(function (r) {
+  analyzeImage(d).then(function (r) {
     if (S.draft !== d) return;
+    var raw = r.items.map(mkItem);
+    var rawSum = sumItems(raw).kcal;
     d.name = r.meal_name || d.name;
-    d.items = r.items.map(mkItem);
+    d.items = raw.map(applyMyFood);
     d.conf = r.confidence;
     d.notes = r.notes;
     d.isFood = r.is_food;
+    d.hasRange = r.kmin > 0 && r.kmax > 0 && rawSum > 0;
+    d.lo = d.hasRange ? Math.min(1, Math.max(0.5, r.kmin / rawSum)) : 1;
+    d.hi = d.hasRange ? Math.max(1, Math.min(2, r.kmax / rawSum)) : 1;
+    d.questions = r.questions;
     if (!d.items.length) d.items = [blankItem()];
     d.status = 'done';
     render();
@@ -479,6 +540,7 @@ function runAnalysis() {
 /* ============ Saglabāšana žurnālā ============ */
 function saveDraft() {
   var d = S.draft;
+  rememberFoods(d.items);
   var items = d.items
     .filter(function (it) { return it.name.trim() || it.kcal > 0; })
     .map(function (it) {
@@ -489,12 +551,14 @@ function saveDraft() {
   var now = new Date();
   var when = parseYmd(d.date);
   when.setHours(now.getHours(), now.getMinutes(), now.getSeconds());
-  db.entries.push({
+  var entry = {
     id: uid(), date: d.date, ts: when.getTime(), meal: d.meal,
     name: (d.name || '').trim() || items.map(function (i) { return i.name; }).join(', ').slice(0, 60),
     items: items, kcal: r0(tot.kcal), p: r1(tot.p), c: r1(tot.c), f: r1(tot.f),
     thumb: d.thumb || null
-  });
+  };
+  if (d.hasRange && tot.kcal > 0) { entry.lo = r0(tot.kcal * d.lo); entry.hi = r0(tot.kcal * d.hi); }
+  db.entries.push(entry);
   save();
   S.day = d.date;
   S.draft = null;
@@ -502,6 +566,302 @@ function saveDraft() {
   S.view = 'today';
   toast('Saglabāts žurnālā');
   render();
+}
+
+/* ============ Mērogs kadrā ============ */
+var REF_OPTIONS = [
+  ['none', 'Nav'],
+  ['plate', 'Mans šķīvis'],
+  ['card', 'Bankas karte (8,6 × 5,4 cm)'],
+  ['coin', '1 € monēta (2,3 cm)'],
+  ['fork', 'Dakšiņa (~19 cm)']
+];
+function getRef() {
+  var r = S.ref;
+  if (!r) r = num(db.settings.plateCm) > 0 ? 'plate' : 'none';
+  if (r === 'plate' && !(num(db.settings.plateCm) > 0)) r = 'none';
+  return r;
+}
+function refText(key) {
+  if (key === 'plate') {
+    var c = num(db.settings.plateCm);
+    return c ? 'the plate or bowl holding the food is ' + c + ' cm in diameter' : '';
+  }
+  if (key === 'card') return 'a standard bank card (85.6 x 54 mm) lies next to the food';
+  if (key === 'coin') return 'a 1 euro coin (23.25 mm in diameter) lies next to the food';
+  if (key === 'fork') return 'a standard dinner fork (about 19 cm long) is next to the food';
+  return '';
+}
+
+/* ============ Mani ēdieni (iegaumētie labojumi) ============ */
+function normName(s) { return String(s || '').toLowerCase().replace(/\s+/g, ' ').trim(); }
+function findFood(name) {
+  var n = normName(name);
+  if (!n) return null;
+  for (var i = 0; i < db.foods.length; i++) {
+    if (normName(db.foods[i].name) === n) return db.foods[i];
+  }
+  return null;
+}
+function itemFromPer(name, grams, per, extra) {
+  var it = {
+    name: name, grams: grams,
+    kcal: r0(per.kcal * grams), p: r1(per.p * grams), c: r1(per.c * grams), f: r1(per.f * grams),
+    per: { kcal: per.kcal, p: per.p, c: per.c, f: per.f }, fav: false
+  };
+  if (extra) Object.assign(it, extra);
+  return it;
+}
+function applyMyFood(it) {
+  var f = findFood(it.name);
+  if (f && f.per && it.grams > 0) return itemFromPer(it.name, it.grams, f.per, { fav: true, fromFoods: true });
+  return it;
+}
+function foodToItem(f) { return itemFromPer(f.name, f.grams || 100, f.per, { fav: true, fromFoods: true }); }
+function rememberFoods(items) {
+  items.forEach(function (it) {
+    if (!it.fav || !(it.grams > 0) || !(it.kcal > 0) || !it.name.trim()) return;
+    var per = { kcal: it.kcal / it.grams, p: (it.p || 0) / it.grams, c: (it.c || 0) / it.grams, f: (it.f || 0) / it.grams };
+    var old = findFood(it.name);
+    if (old) { old.per = per; old.grams = r0(it.grams); old.uses = (old.uses || 0) + 1; old.ts = Date.now(); }
+    else db.foods.push({ name: it.name.trim(), per: per, grams: r0(it.grams), uses: 1, ts: Date.now() });
+  });
+}
+function foodsForPrompt() {
+  return db.foods.slice()
+    .sort(function (a, b) { return (b.uses || 0) - (a.uses || 0) || (b.ts || 0) - (a.ts || 0); })
+    .slice(0, 25)
+    .map(function (f) {
+      return f.name + ': ' + r0(f.per.kcal * 100) + ' kcal / P ' + r1(f.per.p * 100) + ' / C ' + r1(f.per.c * 100) + ' / F ' + r1(f.per.f * 100);
+    }).join('\n');
+}
+function addItemToDraft(it) {
+  var d = S.draft;
+  if (!d) { d = S.draft = newDraft(null, null); d.items = []; }
+  d.items = d.items.filter(function (x) { return x.name.trim() || x.kcal > 0; });
+  d.items.push(it);
+  if (!d.name) d.name = it.name;
+  d.status = 'done';
+  S.view = 'scan';
+  render();
+}
+
+/* ============ Otrais foto ============ */
+function readPhoto(file) {
+  return loadImage(file).then(function (r) {
+    var out = { full: scaleTo(r.img, 1280, 0.85), thumb: scaleTo(r.img, 160, 0.6) };
+    URL.revokeObjectURL(r.url);
+    return out;
+  });
+}
+function onSecondFile(file) {
+  var d = S.draft;
+  if (!file || !d) return;
+  readPhoto(file).then(function (p) {
+    if (S.draft !== d) return;
+    d.img2 = p.full;
+    runAnalysis();
+  }).catch(function (e) { toast(e.message); });
+}
+
+/* ============ Skenēšanas opcijas un precizējošie jautājumi ============ */
+function optionsCard() {
+  var plate = num(db.settings.plateCm) > 0;
+  var sel = h('select', { class: 'in', value: getRef(), onchange: function (e) { S.ref = e.target.value; } },
+    REF_OPTIONS.filter(function (o) { return o[0] !== 'plate' || plate; }).map(function (o) {
+      return h('option', { value: o[0] }, o[0] === 'plate' ? 'Mans šķīvis (' + db.settings.plateCm + ' cm)' : o[1]);
+    }));
+  return h('div', { class: 'card stack' },
+    h('div', null,
+      h('label', { class: 'f' }, 'Mērogs kadrā — palīdz precīzāk noteikt porcijas izmēru'), sel,
+      plate ? null : h('div', { class: 'small muted', style: { marginTop: '4px' } }, 'Iestatījumos vari norādīt sava šķīvja diametru.')),
+    h('label', { class: 'row small' },
+      h('input', { type: 'checkbox', checked: S.twoPhotos, onchange: function (e) { S.twoPhotos = e.target.checked; } }),
+      'Divi foto: no augšas un no sāna (precīzāk)'));
+}
+function questionsCard(d) {
+  var box = h('div', { class: 'card stack' },
+    h('b', null, 'Precizē rezultātu'),
+    h('div', { class: 'small muted' }, 'Atbildi uz to, kas tev zināms — aplikācija pārrēķinās.'));
+  d.questions.forEach(function (q) {
+    var chips = h('div', { class: 'row wrap' });
+    var own = h('input', { class: 'in', type: 'text', placeholder: 'Cita atbilde',
+      value: q.answer && q.options.indexOf(q.answer) < 0 ? q.answer : '',
+      oninput: function (e) { q.answer = e.target.value; paintChips(); } });
+    function paintChips() {
+      chips.replaceChildren.apply(chips, q.options.map(function (o) {
+        return h('button', { class: 'chipbtn' + (q.answer === o ? ' on' : ''), onclick: function () {
+          q.answer = q.answer === o ? '' : o;
+          own.value = '';
+          paintChips();
+        } }, o);
+      }));
+    }
+    paintChips();
+    box.append(h('div', { class: 'stack' }, h('div', null, q.q), chips, own));
+  });
+  box.append(
+    h('button', { class: 'btn pri', onclick: function () {
+      var ans = d.questions.filter(function (q) { return q.answer && q.answer.trim(); })
+        .map(function (q) { return { q: q.q, a: q.answer.trim() }; });
+      if (!ans.length) { toast('Atbildi vismaz uz vienu jautājumu'); return; }
+      d.answers = (d.answers || []).concat(ans);
+      runAnalysis();
+    } }, '↻ Pārrēķināt ar atbildēm'),
+    h('div', { class: 'small muted' }, 'Pārrēķins aizstās sastāvdaļas ar jaunu novērtējumu.'));
+  return box;
+}
+function dayRange(list) {
+  var any = false, lo = 0, hi = 0;
+  list.forEach(function (e) {
+    if (e.lo) any = true;
+    lo += e.lo || e.kcal;
+    hi += e.hi || e.kcal;
+  });
+  return any ? [lo, hi] : null;
+}
+
+/* ============ Svītrkods (Open Food Facts) ============ */
+function lookupBarcode(raw) {
+  var code = String(raw).replace(/\D/g, '');
+  if (code.length < 8) return Promise.reject(new Error('Svītrkodā jābūt vismaz 8 cipariem.'));
+  var url = 'https://world.openfoodfacts.org/api/v2/product/' + code +
+    '?fields=product_name,product_name_lv,brands,nutriments,serving_quantity';
+  return fetch(url).then(function (res) {
+    if (!res.ok && res.status !== 404) throw new Error('Open Food Facts kļūda ' + res.status);
+    return res.json().catch(function () { return null; });
+  }).then(function (j) {
+    var p = j && j.product;
+    if (!j || j.status !== 1 || !p) throw new Error('Produkts nav atrasts Open Food Facts datubāzē. Pievieno to pats.');
+    var n = p.nutriments || {};
+    var kcal100 = num(n['energy-kcal_100g']) || (num(n['energy_100g']) ? num(n['energy_100g']) / 4.184 : 0);
+    if (!kcal100) throw new Error('Šim produktam datubāzē nav norādītas kalorijas.');
+    var brand = p.brands ? String(p.brands).split(',')[0].trim() : '';
+    var name = String(p.product_name_lv || p.product_name || 'Produkts').trim() + (brand ? ' (' + brand + ')' : '');
+    return {
+      name: name.slice(0, 80),
+      grams: num(p.serving_quantity) || 100,
+      per: { kcal: kcal100 / 100, p: num(n.proteins_100g) / 100, c: num(n.carbohydrates_100g) / 100, f: num(n.fat_100g) / 100 }
+    };
+  }).catch(function (e) {
+    if (e instanceof TypeError) throw new Error('Nav savienojuma ar Open Food Facts.');
+    throw e;
+  });
+}
+function makeSheet(title, body, onClose) {
+  var closed = false;
+  var el = h('div', { class: 'sheet', onclick: function (e) { if (e.target === el) close(); } },
+    h('div', { class: 'panel stack' },
+      h('div', { class: 'row' },
+        h('b', { class: 'grow', style: { fontSize: '18px' } }, title),
+        h('button', { class: 'btn sm', onclick: function () { close(); } }, 'Aizvērt')),
+      body));
+  function close() {
+    if (closed) return;
+    closed = true;
+    if (onClose) onClose();
+    el.remove();
+  }
+  document.body.append(el);
+  return { close: close };
+}
+function openBarcode() {
+  var closed = false, stream = null, timer = null, busy = false, lastCode = '';
+  var hasDet = 'BarcodeDetector' in window;
+  var detector = null;
+  if (hasDet) {
+    try { detector = new window.BarcodeDetector({ formats: ['ean_13', 'ean_8', 'upc_a', 'upc_e'] }); }
+    catch (e) { try { detector = new window.BarcodeDetector(); } catch (e2) { detector = null; } }
+  }
+  var status = h('div', { class: 'small muted' }, detector
+    ? 'Pavērs kameru pret svītrkodu…'
+    : 'Šajā pārlūkā automātiska nolasīšana nav pieejama (piem., iPhone Safari). Ievadi ciparus zem svītrkoda.');
+  var video = h('video', { class: 'cam', playsinline: true, autoplay: true });
+  video.muted = true;
+  var codeIn = h('input', { class: 'in', type: 'text', inputmode: 'numeric', placeholder: 'Svītrkoda cipari (8–14)', autocomplete: 'off',
+    onkeydown: function (e) { if (e.key === 'Enter') go(codeIn.value); } });
+  var body = h('div', { class: 'stack' }, detector ? video : null, status,
+    h('div', { class: 'row' }, codeIn, h('button', { class: 'btn pri', onclick: function () { go(codeIn.value); } }, 'Meklēt')));
+  var sheet = makeSheet('Svītrkods', body, cleanup);
+
+  function cleanup() {
+    closed = true;
+    clearTimeout(timer);
+    if (stream) { stream.getTracks().forEach(function (t) { t.stop(); }); stream = null; }
+  }
+  function go(code) {
+    if (busy || closed) return;
+    var digits = String(code).replace(/\D/g, '');
+    busy = true;
+    status.textContent = 'Meklēju ' + digits + '…';
+    lookupBarcode(digits).then(function (p) {
+      if (closed) return;
+      sheet.close();
+      addItemToDraft(itemFromPer(p.name, p.grams, p.per, { fromBarcode: true }));
+      toast('Pievienots: ' + p.name);
+    }, function (e) {
+      if (closed) return;
+      status.textContent = e.message;
+      lastCode = digits;
+      busy = false;
+      loop();
+    });
+  }
+  function loop() {
+    if (closed || !detector || busy) return;
+    var p;
+    try { p = detector.detect(video); } catch (e) { timer = setTimeout(loop, 500); return; }
+    p.then(function (codes) {
+      if (closed) return;
+      for (var i = 0; i < codes.length; i++) {
+        if (codes[i].rawValue && codes[i].rawValue !== lastCode) { go(codes[i].rawValue); return; }
+      }
+      timer = setTimeout(loop, 350);
+    }, function () { if (!closed) timer = setTimeout(loop, 500); });
+  }
+  if (detector && navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+    navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' } }, audio: false }).then(function (s) {
+      if (closed) { s.getTracks().forEach(function (t) { t.stop(); }); return; }
+      stream = s;
+      video.srcObject = s;
+      var pl = video.play();
+      if (pl && pl.catch) pl.catch(function () {});
+      loop();
+    }, function () { status.textContent = 'Kamera nav pieejama — atļauj piekļuvi vai ievadi ciparus zemāk.'; });
+  } else if (detector) {
+    status.textContent = 'Kamera nav pieejama. Ievadi svītrkoda ciparus zemāk.';
+  }
+}
+
+/* ============ Mani ēdieni — saraksts ============ */
+function openFoods(pick) {
+  var list = h('div', { class: 'stack' });
+  var sheet;
+  var q = h('input', { class: 'in', type: 'search', placeholder: 'Meklēt…', oninput: function () { paint(); } });
+  function paint() {
+    var t = normName(q.value);
+    var arr = db.foods.filter(function (f) { return !t || normName(f.name).indexOf(t) >= 0; })
+      .sort(function (a, b) { return (b.uses || 0) - (a.uses || 0) || (b.ts || 0) - (a.ts || 0); });
+    if (!arr.length) {
+      list.replaceChildren(h('div', { class: 'card small muted' }, db.foods.length
+        ? 'Nekas nav atrasts.'
+        : 'Vēl nav saglabātu ēdienu. Izlabo kaloriju vērtību sastāvdaļai vai nospied ☆ pie tās, un tā parādīsies šeit.'));
+      return;
+    }
+    list.replaceChildren.apply(list, arr.map(function (f) {
+      return h('div', { class: 'entry', onclick: pick ? function () { sheet.close(); pick(f); } : null },
+        h('div', { class: 'ent-main' },
+          h('div', { class: 'ent-name' }, f.name),
+          h('div', { class: 'muted small' }, r0(f.per.kcal * 100) + ' kcal / 100 g · parasti ' + (f.grams || 100) + ' g')),
+        h('button', { class: 'btn sm danger', 'aria-label': 'Dzēst', onclick: function (ev) {
+          ev.stopPropagation();
+          db.foods = db.foods.filter(function (x) { return x !== f; });
+          save(); paint();
+        } }, '✕'));
+    }));
+  }
+  sheet = makeSheet('Mani ēdieni', h('div', { class: 'stack' }, q, list), null);
+  paint();
 }
 
 /* ============ Skati ============ */
@@ -554,6 +914,8 @@ function viewToday() {
       h('div', { class: 'small ' + (left < 0 ? '' : 'muted'), style: left < 0 ? { color: 'var(--bad)' } : {} },
         left >= 0 ? 'Atlicis ' + fmt(left) + ' kcal' : 'Pārsniegts par ' + fmt(-left) + ' kcal'));
   }
+  var rng = dayRange(list);
+  if (rng) summary.append(h('div', { class: 'small muted' }, 'Aptuvens diapazons: ' + fmt(rng[0]) + '–' + fmt(rng[1]) + ' kcal'));
   summary.append(h('div', { class: 'chips' },
     macroChip('var(--p)', 'Olbaltumv.', tot.p),
     macroChip('var(--c)', 'Ogļhidr.', tot.c),
@@ -617,7 +979,8 @@ function entryCard(e) {
         h('b', null, fmt(it.kcal) + ' kcal')));
     });
     det.append(h('div', { class: 'muted small', style: { margin: '6px 0 10px' } },
-      'Olb. ' + r1(e.p) + ' g · Ogļ. ' + r1(e.c) + ' g · Tauk. ' + r1(e.f) + ' g'));
+      'Olb. ' + r1(e.p) + ' g · Ogļ. ' + r1(e.c) + ' g · Tauk. ' + r1(e.f) + ' g' +
+      (e.lo ? ' · diapazons ' + fmt(e.lo) + '–' + fmt(e.hi) + ' kcal' : '')));
     var armed = S.delId === e.id;
     det.append(h('div', { class: 'row wrap' },
       h('button', { class: 'btn sm danger', onclick: function (ev) {
@@ -641,9 +1004,13 @@ function entryCard(e) {
 /* ---------- Skenēšana ---------- */
 function updateTotals() {
   if (!T || !S.draft) return;
-  var s = sumItems(S.draft.items);
+  var d = S.draft;
+  var s = sumItems(d.items);
   T.kcal.textContent = fmt(s.kcal);
   T.macros.textContent = 'Olb. ' + r1(s.p) + ' g · Ogļ. ' + r1(s.c) + ' g · Tauk. ' + r1(s.f) + ' g';
+  T.range.textContent = d.hasRange && s.kcal > 0
+    ? 'Aptuvens diapazons: ' + fmt(s.kcal * d.lo) + '–' + fmt(s.kcal * d.hi) + ' kcal'
+    : '';
 }
 function viewScan() {
   var d = S.draft;
@@ -655,30 +1022,50 @@ function viewScan() {
     h('textarea', { class: 'in', rows: '2', placeholder: 'Precizējums, ko modelis ņems vērā',
       value: S.note, oninput: function (e) { S.note = e.target.value; } }));
 
+  function photoButtons(handler, camLabel) {
+    return h('div', { class: 'row' },
+      h('label', { class: 'btn big pri' }, h('span', { class: 'ico' }, '📷'), camLabel,
+        h('input', { type: 'file', accept: 'image/*', capture: 'environment', hidden: true,
+          onchange: function (e) { handler(e.target.files[0]); } })),
+      h('label', { class: 'btn big' }, h('span', { class: 'ico' }, '🖼️'), 'No galerijas',
+        h('input', { type: 'file', accept: 'image/*', hidden: true,
+          onchange: function (e) { handler(e.target.files[0]); } })));
+  }
+
   if (!d) {
     if (!String(db.settings.apiKey).trim()) {
       wrap.append(h('div', { class: 'notice' }, 'Lai analizētu foto, vajadzīga bezmaksas Gemini API atslēga. ',
         h('a', { href: '#', onclick: function (e) { e.preventDefault(); S.view = 'settings'; render(); } }, 'Ievadi to iestatījumos.')));
     }
     wrap.append(noteBox);
+    wrap.append(optionsCard());
+    wrap.append(photoButtons(onFile, 'Nofotografēt'));
     wrap.append(h('div', { class: 'row' },
-      h('label', { class: 'btn big pri' }, h('span', { class: 'ico' }, '📷'), 'Nofotografēt',
-        h('input', { type: 'file', accept: 'image/*', capture: 'environment', hidden: true,
-          onchange: function (e) { onFile(e.target.files[0]); } })),
-      h('label', { class: 'btn big' }, h('span', { class: 'ico' }, '🖼️'), 'No galerijas',
-        h('input', { type: 'file', accept: 'image/*', hidden: true,
-          onchange: function (e) { onFile(e.target.files[0]); } }))));
+      h('button', { class: 'btn grow', onclick: openBarcode }, '▦ Svītrkods'),
+      h('button', { class: 'btn grow', onclick: function () { openFoods(function (f) { addItemToDraft(foodToItem(f)); }); } }, '★ Mani ēdieni')));
     wrap.append(h('button', { class: 'btn', onclick: function () { S.draft = newDraft(null, null); render(); } }, '✍️ Pievienot bez foto'));
     wrap.append(h('div', { class: 'card small muted' },
       h('b', { style: { color: 'var(--ink)' } }, 'Padomi precīzākam rezultātam'),
       h('div', null, '• Fotografē no augšas vai leņķī, labā apgaismojumā.'),
-      h('div', null, '• Liec kadrā visu porciju un, ja iespējams, dakšiņu vai karoti mēroga noteikšanai.'),
-      h('div', null, '• Rezultāts ir aptuvens (parasti ±20–30 %). Pārbaudi un izlabo svarus zemāk.')));
+      h('div', null, '• Liec kadrā visu porciju un izvēlies mērogu (šķīvis, karte, monēta vai dakšiņa).'),
+      h('div', null, '• Iepakotiem produktiem izmanto svītrkodu — dati nāk no etiķetes.'),
+      h('div', null, '• Rezultāts ir aptuvens. Pārbaudi un izlabo svarus zemāk.')));
     return wrap;
   }
 
   if (d.img) {
-    wrap.append(h('img', { class: 'preview', src: d.img, alt: 'Ēdiena foto' }));
+    wrap.append(h('div', { class: 'previews' },
+      h('img', { src: d.img, alt: 'Ēdiena foto' }),
+      d.img2 ? h('img', { src: d.img2, alt: 'Ēdiena foto no sāna' }) : null));
+  }
+
+  if (d.status === 'second') {
+    wrap.append(h('div', { class: 'notice ok' }, 'Pirmais foto gatavs. Tagad nofotografē to pašu ēdienu ',
+      h('b', null, 'no sāna'), ', lai modelis redz porcijas augstumu.'));
+    wrap.append(photoButtons(onSecondFile, 'Foto no sāna'));
+    wrap.append(h('button', { class: 'btn', onclick: runAnalysis }, 'Analizēt tikai ar vienu foto'));
+    wrap.append(h('button', { class: 'btn sm', onclick: function () { S.draft = null; render(); } }, 'Atcelt'));
+    return wrap;
   }
 
   if (d.status === 'loading') {
@@ -724,19 +1111,33 @@ function viewScan() {
   }
   rebuildItems();
   wrap.append(h('h2', null, 'Sastāvdaļas'), itemsBox);
-  wrap.append(h('button', { class: 'btn sm', onclick: function () {
-    d.items.push(blankItem()); rebuildItems(); updateTotals();
-  } }, '＋ Pievienot sastāvdaļu'));
+  wrap.append(h('div', { class: 'row wrap' },
+    h('button', { class: 'btn sm', onclick: function () {
+      d.items.push(blankItem()); rebuildItems(); updateTotals();
+    } }, '＋ Sastāvdaļa'),
+    h('button', { class: 'btn sm', onclick: openBarcode }, '▦ Svītrkods'),
+    h('button', { class: 'btn sm', onclick: function () { openFoods(function (f) { addItemToDraft(foodToItem(f)); }); } }, '★ Mani ēdieni')));
 
-  var tk = h('div', { class: 'tk' }), tm = h('div', { class: 'muted small', style: { marginTop: '6px' } });
-  T = { kcal: tk, macros: tm };
+  var tk = h('div', { class: 'tk' });
+  var tm = h('div', { class: 'muted small', style: { marginTop: '6px' } });
+  var tr = h('div', { class: 'small', style: { marginTop: '2px' } });
+  T = { kcal: tk, macros: tm, range: tr };
   wrap.append(h('div', { class: 'totals' }, h('div', { class: 'small muted' }, 'Kopā'),
-    h('div', { class: 'row', style: { alignItems: 'baseline', gap: '6px' } }, tk, h('span', { class: 'muted' }, 'kcal')), tm));
+    h('div', { class: 'row', style: { alignItems: 'baseline', gap: '6px' } }, tk, h('span', { class: 'muted' }, 'kcal')), tm, tr));
   updateTotals();
+
+  if (d.questions && d.questions.length) wrap.append(questionsCard(d));
 
   if (d.img) {
     wrap.append(noteBox);
-    wrap.append(h('button', { class: 'btn sm', onclick: runAnalysis }, '↻ Analizēt vēlreiz ar piezīmi'));
+    var extra = h('div', { class: 'row wrap' },
+      h('button', { class: 'btn sm', onclick: runAnalysis }, '↻ Analizēt vēlreiz ar piezīmi'));
+    if (!d.img2) {
+      extra.append(h('label', { class: 'btn sm' }, '📸 Pievienot foto no sāna',
+        h('input', { type: 'file', accept: 'image/*', capture: 'environment', hidden: true,
+          onchange: function (e) { onSecondFile(e.target.files[0]); } })));
+    }
+    wrap.append(extra);
   }
 
   var mealSel = h('select', { class: 'in', value: d.meal, onchange: function (e) { d.meal = e.target.value; } },
@@ -757,6 +1158,12 @@ function itemRow(it, onRemove) {
   var gI = h('input', { class: 'in num', type: 'text', inputmode: 'decimal', placeholder: '0', value: it.grams ? String(it.grams) : '' });
   var kI = h('input', { class: 'in num', type: 'text', inputmode: 'decimal', placeholder: '0', value: it.kcal ? String(it.kcal) : '' });
   var mac = h('div', { class: 'macros' });
+  var star = h('button', { class: 'x star' + (it.fav ? ' on' : ''), title: 'Saglabāt maniem ēdieniem',
+    'aria-label': 'Saglabāt maniem ēdieniem', onclick: function () { it.fav = !it.fav; paintStar(); } }, it.fav ? '★' : '☆');
+  function paintStar() {
+    star.textContent = it.fav ? '★' : '☆';
+    star.classList.toggle('on', !!it.fav);
+  }
   function paint() { mac.textContent = 'Olb. ' + r1(it.p) + ' g · Ogļ. ' + r1(it.c) + ' g · Tauk. ' + r1(it.f) + ' g'; }
   gI.addEventListener('input', function () {
     var g = num(gI.value);
@@ -776,16 +1183,19 @@ function itemRow(it, onRemove) {
       it.per = it.per || { kcal: 0, p: 0, c: 0, f: 0 };
       it.per.kcal = it.kcal / it.grams;
     }
+    if (it.kcal > 0) { it.fav = true; paintStar(); } // labojums tiek iegaumēts
     updateTotals();
   });
   paint();
+  var tag = it.fromFoods ? '★ ņemts no maniem ēdieniem' : (it.fromBarcode ? '▦ dati no Open Food Facts datubāzes' : null);
   return h('div', { class: 'item' },
-    h('div', { class: 'row' }, nameI,
+    h('div', { class: 'row' }, nameI, star,
       h('button', { class: 'x', 'aria-label': 'Noņemt', onclick: onRemove }, '✕')),
     h('div', { class: 'row' },
       h('label', { class: 'unit' }, gI, h('span', null, 'g')),
       h('label', { class: 'unit' }, kI, h('span', null, 'kcal'))),
-    mac);
+    mac,
+    tag ? h('div', { class: 'small', style: { color: 'var(--acc)' } }, tag) : null);
 }
 
 /* ---------- Iestatījumi ---------- */
@@ -819,6 +1229,9 @@ function viewSettings() {
     h('div', null, h('label', { class: 'f' }, 'Dienas mērķis (kcal)'),
       h('input', { class: 'in', type: 'text', inputmode: 'numeric', value: s.goal ? String(s.goal) : '',
         onchange: function (e) { db.settings.goal = r0(num(e.target.value)); save(); toast('Mērķis saglabāts'); } })),
+    h('div', null, h('label', { class: 'f' }, 'Šķīvja diametrs (cm) — neobligāti, palīdz noteikt porcijas izmēru'),
+      h('input', { class: 'in', type: 'text', inputmode: 'decimal', placeholder: 'piem., 26', value: s.plateCm ? String(s.plateCm) : '',
+        onchange: function (e) { db.settings.plateCm = r1(num(e.target.value)); save(); toast('Šķīvja izmērs saglabāts'); } })),
     h('div', { class: 'row wrap' },
       h('button', { class: 'btn sm', onclick: testConnection }, '🔌 Pārbaudīt savienojumu'),
       S.testMsg ? h('span', { class: 'small', style: { color: S.testMsg.ok ? 'var(--acc)' : 'var(--bad)' } }, S.testMsg.text) : null)));
@@ -832,6 +1245,7 @@ function viewSettings() {
         h('button', { class: 'btn sm', onclick: exportCsv }, '⬇ CSV'),
         h('button', { class: 'btn sm', onclick: exportJson }, '⬇ JSON kopija'),
         h('label', { class: 'btn sm' }, '⬆ Importēt JSON', fileIn)),
+      h('button', { class: 'btn sm', onclick: function () { openFoods(null); } }, '★ Mani ēdieni (' + db.foods.length + ')'),
       h('button', { class: 'btn sm danger', onclick: function () {
         if (!S.clearArmed) { S.clearArmed = true; render(); return; }
         db.entries = []; save(); S.clearArmed = false; toast('Visi ieraksti izdzēsti'); render();
@@ -886,7 +1300,12 @@ function exportCsv() {
 }
 function exportJson() {
   download('kalorijas-kopija-' + today() + '.json', 'application/json',
-    JSON.stringify({ version: 1, settings: { model: db.settings.model, goal: db.settings.goal }, entries: db.entries }));
+    JSON.stringify({
+      version: 2,
+      settings: { model: db.settings.model, goal: db.settings.goal, plateCm: db.settings.plateCm },
+      entries: db.entries,
+      foods: db.foods
+    }));
 }
 function importJson(file) {
   if (!file) return;
@@ -901,9 +1320,14 @@ function importJson(file) {
       j.entries.forEach(function (e) {
         if (e && e.id && e.date && Array.isArray(e.items) && !have[e.id]) { db.entries.push(e); have[e.id] = true; added++; }
       });
+      var foodsAdded = 0;
+      (Array.isArray(j.foods) ? j.foods : []).forEach(function (f) {
+        if (f && f.name && f.per && !findFood(f.name)) { db.foods.push(f); foodsAdded++; }
+      });
       if (j.settings && j.settings.goal && !db.settings.goal) db.settings.goal = num(j.settings.goal);
+      if (j.settings && j.settings.plateCm && !db.settings.plateCm) db.settings.plateCm = num(j.settings.plateCm);
       save();
-      toast('Importēti ieraksti: ' + added);
+      toast('Importēti ieraksti: ' + added + (foodsAdded ? ', ēdieni: ' + foodsAdded : ''));
       render();
     } catch (e) { toast('Neizdevās importēt — nederīgs fails'); }
   };
