@@ -132,7 +132,7 @@ a{color:var(--acc)}
 
 /* ============ Konstantes ============ */
 var LS_KEY = 'kalorijas_v1';
-var DEFAULTS = { apiKey: '', model: 'gemini-2.5-flash', goal: 2000, plateCm: 0 };
+var DEFAULTS = { apiKey: '', model: 'gemini-2.5-flash', goal: 2000, plateCm: 0, biasOn: true, lastBackup: 0 };
 var MEALS = [
   ['brokastis', 'Brokastis', '🌅'],
   ['pusdienas', 'Pusdienas', '☀️'],
@@ -281,7 +281,10 @@ var S = {
   testMsg: null,
   installDismissed: false,
   ref: '',
-  twoPhotos: false
+  twoPhotos: false,
+  persisted: null,
+  backupDismissed: false,
+  biasResetArmed: false
 };
 var T = null; // kopsummu elementu atsauces skenēšanas skatā
 
@@ -388,7 +391,8 @@ function newDraft(img, thumb) {
     status: img ? (S.twoPhotos ? 'second' : 'loading') : 'done', error: '',
     name: '', meal: mealByHour(new Date().getHours()), date: today(),
     items: img ? [] : [blankItem()], conf: '', notes: '', isFood: true,
-    questions: [], answers: [], hasRange: false, lo: 1, hi: 1, ref: getRef()
+    questions: [], answers: [], hasRange: false, lo: 1, hi: 1, ref: getRef(),
+    editId: null, bias: null, estTotal: 0
   };
 }
 
@@ -517,8 +521,21 @@ function runAnalysis() {
     if (S.draft !== d) return;
     var raw = r.items.map(mkItem);
     var rawSum = sumItems(raw).kcal;
+    var bias = biasInfo();
+    var k = bias.factor;
+    var useBias = db.settings.biasOn !== false && bias.n >= 5 && Math.abs(k - 1) >= 0.03;
+    var est = 0;
+    d.items = raw.map(function (it) {
+      if (findFood(it.name) && it.grams > 0) return applyMyFood(it);   // lietotāja paša vērtības netiek koriģētas
+      it.fromModel = true;
+      it.estKcal = it.kcal;                                            // modeļa sākotnējais aprēķins (pirms korekcijas)
+      est += it.kcal;
+      if (useBias) scaleItem(it, k);
+      return it;
+    });
+    d.estTotal = est;
+    d.bias = useBias ? { n: bias.n, factor: k } : null;
     d.name = r.meal_name || d.name;
-    d.items = raw.map(applyMyFood);
     d.conf = r.confidence;
     d.notes = r.notes;
     d.isFood = r.is_food;
@@ -548,23 +565,40 @@ function saveDraft() {
     });
   if (!items.length) { toast('Pievieno vismaz vienu produktu'); return; }
   var tot = sumItems(items);
-  var now = new Date();
+  var orig = null;
+  if (d.editId) {
+    for (var i = 0; i < db.entries.length; i++) if (db.entries[i].id === d.editId) orig = db.entries[i];
+  }
+  var base = orig && orig.ts ? new Date(orig.ts) : new Date();
   var when = parseYmd(d.date);
-  when.setHours(now.getHours(), now.getMinutes(), now.getSeconds());
+  when.setHours(base.getHours(), base.getMinutes(), base.getSeconds());
   var entry = {
-    id: uid(), date: d.date, ts: when.getTime(), meal: d.meal,
+    id: orig ? orig.id : uid(), date: d.date, ts: when.getTime(), meal: d.meal,
     name: (d.name || '').trim() || items.map(function (i) { return i.name; }).join(', ').slice(0, 60),
     items: items, kcal: r0(tot.kcal), p: r1(tot.p), c: r1(tot.c), f: r1(tot.f),
     thumb: d.thumb || null
   };
   if (d.hasRange && tot.kcal > 0) { entry.lo = r0(tot.kcal * d.lo); entry.hi = r0(tot.kcal * d.hi); }
-  db.entries.push(entry);
+  if (orig) {
+    // labojot ierakstu, modeļa kļūdas dati paliek, galīgā vērtība tiek pārskaitīta proporcionāli
+    if (orig.est > 0 && orig.fin > 0) {
+      entry.est = orig.est;
+      entry.fin = orig.kcal > 0 ? Math.max(1, r0(orig.fin * entry.kcal / orig.kcal)) : orig.fin;
+    }
+    db.entries[db.entries.indexOf(orig)] = entry;
+  } else {
+    if (d.estTotal > 0) {
+      var fin = d.items.reduce(function (a, it) { return a + (it.fromModel ? (it.kcal || 0) : 0); }, 0);
+      if (fin > 0) { entry.est = r0(d.estTotal); entry.fin = r0(fin); }
+    }
+    db.entries.push(entry);
+  }
   save();
   S.day = d.date;
   S.draft = null;
   S.note = '';
   S.view = 'today';
-  toast('Saglabāts žurnālā');
+  toast(orig ? 'Izmaiņas saglabātas' : 'Saglabāts žurnālā');
   render();
 }
 
@@ -864,6 +898,126 @@ function openFoods(pick) {
   paint();
 }
 
+/* ============ Ierakstu labošana ============ */
+function editEntry(e) {
+  var d = newDraft(null, null);
+  d.editId = e.id;
+  d.name = e.name;
+  d.meal = e.meal;
+  d.date = e.date;
+  d.thumb = e.thumb || null;
+  d.items = e.items.map(function (it) {
+    var o = { name: it.name, grams: it.grams || 0, kcal: it.kcal || 0, p: it.p || 0, c: it.c || 0, f: it.f || 0, per: null, fav: false };
+    if (o.grams > 0) o.per = { kcal: o.kcal / o.grams, p: o.p / o.grams, c: o.c / o.grams, f: o.f / o.grams };
+    return o;
+  });
+  if (!d.items.length) d.items = [blankItem()];
+  if (e.lo && e.kcal > 0) { d.hasRange = true; d.lo = e.lo / e.kcal; d.hi = e.hi / e.kcal; }
+  S.draft = d;
+  S.view = 'scan';
+  render();
+  window.scrollTo(0, 0);
+}
+function cancelDraft() {
+  var wasEdit = S.draft && S.draft.editId;
+  S.draft = null;
+  if (wasEdit) S.view = 'today';
+  render();
+}
+
+/* ============ Personīgā korekcija ============ */
+function scaleItem(it, k) {
+  it.kcal = r0(it.kcal * k);
+  it.p = r1(it.p * k);
+  it.c = r1(it.c * k);
+  it.f = r1(it.f * k);
+  if (it.grams > 0) it.per = { kcal: it.kcal / it.grams, p: it.p / it.grams, c: it.c / it.grams, f: it.f / it.grams };
+}
+function biasInfo() {
+  var xs = db.entries
+    .filter(function (e) { return e.est > 0 && e.fin > 0; })
+    .sort(function (a, b) { return (b.ts || 0) - (a.ts || 0); })
+    .slice(0, 30)
+    .map(function (e) { return e.fin / e.est; })
+    .filter(function (r) { return r >= 0.4 && r <= 2.5; });
+  var n = xs.length;
+  if (n < 5) return { n: n, factor: 1, raw: 1 };
+  xs.sort(function (a, b) { return a - b; });
+  var med = n % 2 ? xs[(n - 1) / 2] : (xs[n / 2 - 1] + xs[n / 2]) / 2;
+  var f = 1 + (med - 1) * Math.min(1, n / 15);     // sākumā korekcija ir piesardzīga
+  f = Math.max(0.7, Math.min(1.4, f));
+  return { n: n, factor: f, raw: med };
+}
+function fmtFactor(f) { return (Math.round(f * 100) / 100).toFixed(2).replace('.', ','); }
+function biasCard() {
+  var info = biasInfo();
+  var on = db.settings.biasOn !== false;
+  var status;
+  if (info.n < 5) status = 'Vajag vēl ' + (5 - info.n) + ' ierakstus no foto, lai korekcija varētu ieslēgties (pašlaik ' + info.n + ').';
+  else if (Math.abs(info.factor - 1) < 0.03) status = 'Pēc ' + info.n + ' ierakstiem korekcijas nav — modelis tev trāpa labi.';
+  else status = 'Pēc ' + info.n + ' ierakstiem modeļa aprēķins tiek reizināts ar ×' + fmtFactor(info.factor) + '.';
+  var armed = S.biasResetArmed;
+  return h('div', { class: 'card stack' },
+    h('b', null, '🎯 Personīgā korekcija'),
+    h('div', { class: 'small muted' }, 'Aplikācija salīdzina modeļa aprēķinu ar to, ko tu pēc tam izlaboji. Ja modelis tev sistemātiski kļūdās vienā virzienā, nākamie aprēķini tiek pielāgoti. Darbojas tikai ar ierakstiem no foto.'),
+    h('label', { class: 'row small' },
+      h('input', { type: 'checkbox', checked: on, onchange: function (e) { db.settings.biasOn = e.target.checked; save(); render(); } }),
+      'Izmantot korekciju'),
+    h('div', { class: 'small' }, status),
+    h('button', { class: 'btn sm danger', onclick: function () {
+      if (!S.biasResetArmed) { S.biasResetArmed = true; render(); return; }
+      db.entries.forEach(function (e) { delete e.est; delete e.fin; });
+      S.biasResetArmed = false; save(); toast('Korekcijas dati atiestatīti'); render();
+    } }, armed ? 'Vēlreiz — atiestatīt korekciju' : 'Atiestatīt korekcijas datus'));
+}
+
+/* ============ Rezerves kopija ============ */
+function backupPayload() {
+  return {
+    version: 2,
+    settings: { model: db.settings.model, goal: db.settings.goal, plateCm: db.settings.plateCm },
+    entries: db.entries,
+    foods: db.foods
+  };
+}
+function markBackup() { db.settings.lastBackup = Date.now(); save(); }
+function backupLabel() {
+  var lb = num(db.settings.lastBackup);
+  if (!lb) return 'vēl nav veikta';
+  var days = Math.floor((Date.now() - lb) / 864e5);
+  return days <= 0 ? 'šodien' : (days === 1 ? 'vakar' : 'pirms ' + days + ' d.');
+}
+function backupDue() {
+  var lb = num(db.settings.lastBackup);
+  return db.entries.length >= 3 && !S.backupDismissed && (!lb || Date.now() - lb > 7 * 864e5);
+}
+function shareBackup() {
+  var name = 'kalorijas-kopija-' + today() + '.json';
+  var text = JSON.stringify(backupPayload());
+  var file = null;
+  if (navigator.share && navigator.canShare && typeof File === 'function') {
+    var types = ['application/json', 'text/plain'];
+    for (var i = 0; i < types.length && !file; i++) {
+      try {
+        var f = new File([text], name, { type: types[i] });
+        if (navigator.canShare({ files: [f] })) file = f;
+      } catch (e) { /* nākamais tips */ }
+    }
+  }
+  if (!file) {
+    download(name, 'application/json', text);
+    markBackup(); toast('Kopija lejupielādēta'); render();
+    return;
+  }
+  navigator.share({ files: [file], title: 'Kaloriju sekotāja kopija' }).then(function () {
+    markBackup(); toast('Kopija saglabāta'); render();
+  }, function (e) {
+    if (e && e.name === 'AbortError') return;
+    download(name, 'application/json', text);
+    markBackup(); toast('Kopija lejupielādēta'); render();
+  });
+}
+
 /* ============ Skati ============ */
 function render() {
   var app = $('#app');
@@ -893,6 +1047,13 @@ function viewToday() {
       h('div', { class: 'grow small' }, '🥐 Uzstādi aplikāciju sākuma ekrānā'),
       h('button', { class: 'btn sm pri', onclick: doInstall }, 'Instalēt'),
       h('button', { class: 'btn sm', 'aria-label': 'Aizvērt', onclick: function () { S.installDismissed = true; render(); } }, '✕')));
+  }
+
+  if (backupDue()) {
+    wrap.append(h('div', { class: 'notice row' },
+      h('div', { class: 'grow small' }, '💾 Rezerves kopija: ' + backupLabel() + '. Dati glabājas tikai šajā telefonā.'),
+      h('button', { class: 'btn sm pri', onclick: shareBackup }, 'Saglabāt'),
+      h('button', { class: 'btn sm', 'aria-label': 'Aizvērt', onclick: function () { S.backupDismissed = true; render(); } }, '✕')));
   }
 
   wrap.append(h('div', { class: 'daynav' },
@@ -983,6 +1144,7 @@ function entryCard(e) {
       (e.lo ? ' · diapazons ' + fmt(e.lo) + '–' + fmt(e.hi) + ' kcal' : '')));
     var armed = S.delId === e.id;
     det.append(h('div', { class: 'row wrap' },
+      h('button', { class: 'btn sm', onclick: function (ev) { ev.stopPropagation(); editEntry(e); } }, '✏️ Labot'),
       h('button', { class: 'btn sm danger', onclick: function (ev) {
         ev.stopPropagation();
         if (!armed) { S.delId = e.id; render(); return; }
@@ -1015,7 +1177,7 @@ function updateTotals() {
 function viewScan() {
   var d = S.draft;
   var wrap = h('div', { class: 'stack' });
-  wrap.append(h('h1', null, 'Skenēt ēdienu'));
+  wrap.append(h('h1', null, d && d.editId ? 'Labot ierakstu' : 'Skenēt ēdienu'));
 
   var noteBox = h('div', null,
     h('label', { class: 'f' }, 'Piezīme (nav obligāta) — piem. „250 g”, „ar sviestu”, „bez cukura”'),
@@ -1093,8 +1255,10 @@ function viewScan() {
       h('span', { class: 'badge ' + d.conf }, CONF_LV[d.conf] || CONF_LV.medium),
       h('span', { class: 'muted small' }, 'Aptuvens novērtējums — pārbaudi svarus')));
     if (d.notes) wrap.append(h('div', { class: 'notice ok small' }, d.notes));
+    if (d.bias) wrap.append(h('div', { class: 'notice small' }, '🎯 Korekcija: pēc taviem iepriekšējiem labojumiem (' + d.bias.n + ' ieraksti) modeļa vērtības reizinātas ar ×' + fmtFactor(d.bias.factor) + '.'));
   }
 
+  if (!d.img && d.thumb) wrap.append(h('img', { class: 'thumb', src: d.thumb, alt: '' }));
   wrap.append(h('div', null,
     h('label', { class: 'f' }, 'Ieraksta nosaukums'),
     h('input', { class: 'in', type: 'text', value: d.name, placeholder: 'piem., Vistas fileja ar rīsiem',
@@ -1148,8 +1312,8 @@ function viewScan() {
     h('div', { class: 'grow' }, h('label', { class: 'f' }, 'Datums'), dateIn)));
 
   wrap.append(h('div', { class: 'row' },
-    h('button', { class: 'btn pri grow', onclick: saveDraft }, '✓ Saglabāt žurnālā'),
-    h('button', { class: 'btn', onclick: function () { S.draft = null; render(); } }, 'Atcelt')));
+    h('button', { class: 'btn pri grow', onclick: saveDraft }, d.editId ? '✓ Saglabāt izmaiņas' : '✓ Saglabāt žurnālā'),
+    h('button', { class: 'btn', onclick: cancelDraft }, 'Atcelt')));
   return wrap;
 }
 function itemRow(it, onRemove) {
@@ -1238,10 +1402,15 @@ function viewSettings() {
 
   var fileIn = h('input', { type: 'file', accept: 'application/json,.json', hidden: true,
     onchange: function (e) { importJson(e.target.files[0]); } });
+  wrap.append(biasCard());
   wrap.append(h('h2', null, 'Dati'),
     h('div', { class: 'card stack' },
-      h('div', { class: 'small muted' }, 'Ieraksti glabājas tikai šajā ierīcē (pārlūka krātuvē). Dari rezerves kopiju laiku pa laikam.'),
+      h('div', { class: 'small muted' }, 'Ieraksti glabājas tikai šajā ierīcē (pārlūka krātuvē). Ja pārlūka dati tiek notīrīti vai telefons nomainīts, tie pazūd — dari rezerves kopiju.'),
+      h('div', { class: 'small' }, '💾 Pēdējā rezerves kopija: ' + backupLabel()),
+      S.persisted === null ? null : h('div', { class: 'small', style: { color: S.persisted ? 'var(--acc)' : 'var(--warn)' } },
+        S.persisted ? '🔒 Pastāvīgā krātuve ieslēgta — pārlūks datus pats nedzēsīs.' : '⚠ Pastāvīgā krātuve nav piešķirta. Uzstādi aplikāciju sākuma ekrānā, lai samazinātu datu zaudēšanas risku.'),
       h('div', { class: 'row wrap' },
+        h('button', { class: 'btn sm pri', onclick: shareBackup }, '📤 Saglabāt kopiju'),
         h('button', { class: 'btn sm', onclick: exportCsv }, '⬇ CSV'),
         h('button', { class: 'btn sm', onclick: exportJson }, '⬇ JSON kopija'),
         h('label', { class: 'btn sm' }, '⬆ Importēt JSON', fileIn)),
@@ -1299,13 +1468,10 @@ function exportCsv() {
   download('kalorijas-' + today() + '.csv', 'text/csv;charset=utf-8', '﻿' + text);
 }
 function exportJson() {
-  download('kalorijas-kopija-' + today() + '.json', 'application/json',
-    JSON.stringify({
-      version: 2,
-      settings: { model: db.settings.model, goal: db.settings.goal, plateCm: db.settings.plateCm },
-      entries: db.entries,
-      foods: db.foods
-    }));
+  download('kalorijas-kopija-' + today() + '.json', 'application/json', JSON.stringify(backupPayload()));
+  markBackup();
+  toast('Kopija lejupielādēta');
+  render();
 }
 function importJson(file) {
   if (!file) return;
@@ -1335,6 +1501,15 @@ function importJson(file) {
 }
 
 /* ============ Starts ============ */
+if (navigator.storage && navigator.storage.persisted) {
+  navigator.storage.persisted().then(function (p) {
+    if (p || !navigator.storage.persist) return p;
+    return navigator.storage.persist();
+  }).then(function (ok) {
+    S.persisted = !!ok;
+    if (S.view === 'settings') render();
+  }).catch(function () {});
+}
 window.addEventListener('hashchange', function () {
   if (location.hash === '#scan') { S.view = 'scan'; render(); }
 });

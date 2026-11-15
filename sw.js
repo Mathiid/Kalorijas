@@ -1,4 +1,4 @@
-const CACHE = 'kalorijas-v3';
+const CACHE = 'kalorijas-v4';
 const SHELL = ['./', './index.html', './manifest.webmanifest', './icon-192.png', './icon-512.png', './icon-180.png', './favicon-32.png'];
 
 self.addEventListener('install', e => {
